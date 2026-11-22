@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Navigation-bar icon appearance is supported starting with Android 8.1. -->
+    <style name="MuseTheme" parent="MuseBaseTheme">
+        <item name="android:windowLightNavigationBar">@bool/muse_light_bars</item>
+    </style>
+    <style name="MuseSheet" parent="MuseBaseSheet">
+        <item name="android:windowLightNavigationBar">@bool/muse_light_bars</item>
+    </style>
+</resources>
