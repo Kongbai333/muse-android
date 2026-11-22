@@ -31,6 +31,9 @@ final class AccountSidebar extends FrameLayout {
         void openAccount(AccountStore.Account account);
         void refreshAccount(AccountStore.Account account);
         void editAccount(AccountStore.Account account);
+        void exportAccounts();
+        void importAccounts();
+        void importCookieText();
         void createStudioSession();
         void selectStudioSession(StudioSession session);
         void deleteStudioSessions(List<StudioSession> sessions);
@@ -409,6 +412,11 @@ final class AccountSidebar extends FrameLayout {
             : canAddAccount ? ui.primary("添加账号", () -> host.editAccount(null))
             : ui.note("更新 Android System WebView 或 Chrome 后可添加多个账号。", 0);
         footer.addView(action, new LinearLayout.LayoutParams(-1, -2));
+        if (!sessionsShown && !picking) {
+            footer.addView(ui.outline("导出账号与代理…", host::exportAccounts), new LinearLayout.LayoutParams(-1, -2));
+            footer.addView(ui.outline("导入账号包…", host::importAccounts), new LinearLayout.LayoutParams(-1, -2));
+            footer.addView(ui.outline("导入 Cookie 文本…", host::importCookieText), new LinearLayout.LayoutParams(-1, -2));
+        }
 
         navigation.removeAllViews();
         navigation.addView(navRow(R.drawable.ic_studio, "工作室", "", studioActive, host::openStudio));

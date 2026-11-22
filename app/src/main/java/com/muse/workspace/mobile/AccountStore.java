@@ -18,6 +18,7 @@ final class AccountStore {
         String name;
         private String proxyId = "";
         private JSONObject legacyProxy;
+        Boolean transferSourceForceProxy;
 
         Account(String id, String name) {
             this.id = id;
@@ -74,6 +75,7 @@ final class AccountStore {
                 if (!name.isEmpty()) {
                     Account account = new Account(id, name);
                     account.proxyId = item.optString("proxyId", "");
+                    if (item.opt("transferSourceForceProxy") instanceof Boolean value) account.transferSourceForceProxy = value;
                     if (account.proxyId.isEmpty() && item.has("proxy")) {
                         account.legacyProxy = item.optJSONObject("proxy");
                         if (account.legacyProxy != null) {
@@ -131,6 +133,31 @@ final class AccountStore {
         save();
     }
 
+    /** An import candidate has a fresh UUID but is deliberately absent from all()/current(). */
+    static Account candidate(AccountTransferFlow.Candidate candidate) {
+        Account account = new Account(UUID.fromString(candidate.id).toString(), candidate.source.name);
+        account.proxyId = candidate.proxyId == null ? "" : candidate.proxyId;
+        account.transferSourceForceProxy = candidate.source.sourceForceProxy;
+        return account;
+    }
+
+    /** One persistence boundary after route + isolated Cookie callbacks + flush have completed. */
+    void activateImported(List<Account> candidates) throws IOException {
+        if (candidates.isEmpty()) throw new IOException("没有可激活的账号。");
+        java.util.HashSet<String> ids = new java.util.HashSet<>();
+        for (Account existing : accounts) ids.add(existing.id);
+        for (Account candidate : candidates) if (!ids.add(candidate.id)) throw new IOException("导入账号标识重复。");
+        String previous = selected;
+        accounts.addAll(candidates);
+        selected = candidates.get(0).id;
+        if (saveAccounts().commit()) return;
+        accounts.removeAll(candidates);
+        selected = previous;
+        // Restore the in-process preferences cache as well as the native list on failed commit.
+        saveAccounts().commit();
+        throw new IOException("无法保存导入账号，账号未激活。");
+    }
+
     void update(Account account, String name, String proxyId) throws IOException {
         String previous = account.proxyId;
         JSONObject oldLegacy = account.legacyProxy;
@@ -171,6 +198,7 @@ final class AccountStore {
                 JSONObject item = new JSONObject().put("id", account.id).put("name", account.name);
                 if (!account.proxyId.isEmpty()) item.put("proxyId", account.proxyId);
                 else if (account.legacyProxy != null) item.put("proxy", account.legacyProxy);
+                if (account.transferSourceForceProxy != null) item.put("transferSourceForceProxy", account.transferSourceForceProxy);
                 list.put(item);
             }
         } catch (JSONException exception) {

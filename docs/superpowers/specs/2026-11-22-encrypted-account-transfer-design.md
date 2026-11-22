@@ -4,7 +4,7 @@
 
 ## 架构与默认行为
 
-1. `AccountTransferCrypto` 使用标准 JCA PBKDF2-HMAC-SHA256/AES-256-GCM；精确 envelope/AAD/限制及数据 schema 由 `docs/protocols/account-transfer-v1.md` 定义，Java/Rust 互解后共用，不能各自发布另一种 v1。CPU 派生在单线程后台执行，密码 char[]/派生密钥/明文字节使用后清零，不落配置、日志或明文临时文件。
+1. `AccountTransferCrypto` 使用标准 JCA PBKDF2-HMAC-SHA256/AES-256-GCM；精确 envelope/AAD/限制及数据 schema 由 `docs/protocols/account-transfer-v1.md` 定义，Java/Rust 互解后共用，不能各自发布另一种 v1。CPU 派生在单线程后台执行，密码的可变字符数组/派生密钥/明文字节使用后清零，不落配置、日志或明文临时文件。
 2. `AccountTransferBundle` 负责已认证 UTF-8 JSON 的严格字段/引用/大小/网站范围验证和 Cookie 文本兼容。`AccountTransferCookies` 负责目标 profile 的本地读取、GET_COOKIE_INFO 属性转换和逐条 setCookie/flush，不为导出导航网站；缺失属性标 unknown，不伪造 expiry。
 3. `AccountTransferFlow` 是可取消、带代次的异步准备/写入/提交状态机。候选账号不进入 AccountStore 的可调度列表；代理、profile 与所有 Cookie 全部准备成功后，才一次性提交新账号并允许导航。崩溃前未提交的孤立 profile/代理不得被调度。失败不修改包外账号，取消后回调不能提交。
 4. `MuseWeb` 在迁移期间关闭已有 worker/parked/前台页并阻止 open/openWorker/pump 导航；路由配置成功、Cookie 回调及 flush 后才能激活。`AccountStore.activateImported` 单次 commit 保存全部新候选，不复用源 ID/名称、不覆盖已有账号。代理每个包内引用新建一次，保留共享关系，失败仅回滚本次新节点。

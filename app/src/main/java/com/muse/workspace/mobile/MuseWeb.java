@@ -64,6 +64,8 @@ final class MuseWeb {
     private String initialUrl = StudioDraft.HOME;
     private String notice = "";
     private boolean loading;
+    private boolean transferActive;
+    private Consumer<String> transferRoute;
 
     MuseWeb(Activity activity, Host host, WebMicrophone microphone, ProxyStore proxies) {
         this.activity = activity;
@@ -126,12 +128,18 @@ final class MuseWeb {
     boolean canGoBack() { return view != null && view.canGoBack(); }
 
     void open(AccountStore.Account selected, boolean profiles) {
+        if (transferActive) return;
         bind(selected, profiles);
         wantsBrowser = true;
         pump();
     }
 
     WorkPage openWorker(AccountStore.Account selected, boolean profiles, String url, String script, Consumer<String> failure) {
+        if (transferActive) {
+            WorkPage blocked = new WorkPage(url, script, failure);
+            main.post(() -> blocked.fail("账号迁移期间暂停后台网页。"));
+            return blocked;
+        }
         bind(selected, profiles);
         if (worker != null) worker.close();
         WorkPage page = new WorkPage(url, script, failure);
@@ -143,6 +151,7 @@ final class MuseWeb {
 
     /** 切换到另一个账号：同一路由时保留当前网页，否则完整关闭。 */
     void switchTo(AccountStore.Account selected, boolean profiles) {
+        if (transferActive) return;
         if (selected != null) bind(selected, profiles);
     }
 
@@ -170,12 +179,43 @@ final class MuseWeb {
     }
 
     private void pump() {
+        if (transferActive) return;
         if (account == null || (!wantsBrowser && worker == null)) return;
         if (routeReady) {
             if (hub != null && "hub".equals(appliedRoute) && !ensureRegistered()) return;
             if (wantsBrowser && view == null) createBrowser();
             if (worker != null && worker.web == null) worker.start();
         } else if (!preparing) startRoute();
+    }
+
+    boolean beginTransfer() {
+        if (transferActive || checking) return false;
+        transferActive = true;
+        try { close(); return true; }
+        catch (RuntimeException error) { transferActive = false; throw error; }
+    }
+
+    void prepareTransferRoute(AccountStore.Account candidate, boolean profiles, Consumer<String> ready) {
+        if (!transferActive) { ready.accept("cancelled"); return; }
+        close();
+        account = candidate;
+        multiProfile = profiles;
+        usingProxy = candidate.hasProxy();
+        transferRoute = ready;
+        startRoute();
+    }
+
+    void endTransfer() {
+        if (!transferActive) return;
+        transferRoute = null;
+        try { close(); }
+        finally { transferActive = false; host.browserChanged(); }
+    }
+
+    private void finishTransferRoute(String error) {
+        Consumer<String> ready = transferRoute;
+        transferRoute = null;
+        if (ready != null) ready.accept(error);
     }
 
     /** 当前账号在分流器里登记（或更新）自己的上游。 */
@@ -229,7 +269,10 @@ final class MuseWeb {
             if (generation != routeGeneration) return;
             preparing = false;
             if (error != null) failedToOpen(error);
-            else { routeReady = true; appliedRoute = key; pump(); }
+            else {
+                routeReady = true; appliedRoute = key;
+                if (transferActive) finishTransferRoute(null); else pump();
+            }
         });
     }
 
@@ -294,10 +337,12 @@ final class MuseWeb {
         closeBridge();
         notice = message;
         if (worker != null) worker.fail(message);
+        if (transferRoute != null) finishTransferRoute("route");
         host.browserChanged();
     }
 
     void navigate(String url) {
+        if (transferActive) return;
         if (!StudioDraft.webUrl(url)) return;
         initialUrl = url;
         if (view == null) return;
@@ -307,6 +352,7 @@ final class MuseWeb {
     }
 
     void reload() {
+        if (transferActive) return;
         if (view == null) return;
         microphone.cancelPending();
         notice = "";
@@ -314,6 +360,7 @@ final class MuseWeb {
     }
 
     void back() {
+        if (transferActive) return;
         if (canGoBack()) {
             microphone.cancelPending();
             notice = "";
@@ -443,6 +490,8 @@ final class MuseWeb {
 
     void close() {
         routeGeneration++;
+        Consumer<String> pendingTransfer = transferRoute;
+        transferRoute = null;
         dropParked();
         appliedRoute = null;
         host.hideVideo();
@@ -466,6 +515,7 @@ final class MuseWeb {
         closeBridge();
         if (hub != null) { hub.close(); hub = null; }
         account = null;
+        if (pendingTransfer != null) pendingTransfer.accept("cancelled");
     }
 
 

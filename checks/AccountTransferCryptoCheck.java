@@ -33,6 +33,13 @@ public final class AccountTransferCryptoCheck {
             reject(() -> AccountTransferCrypto.decrypt(expected, "SYNTHETIC-wrong-pass".toCharArray()), "wrong passphrase");
             byte[] tampered = expected.clone(); tampered[tampered.length - 8] ^= 1;
             reject(() -> AccountTransferCrypto.decrypt(tampered, phrase), "tampered ciphertext/tag");
+            String originalText=new String(expected,StandardCharsets.US_ASCII);
+            for(String field:new String[]{"salt","nonce"}){
+                int at=originalText.indexOf("\""+field+"\":\"")+field.length()+4;
+                char replacement=originalText.charAt(at)=='A'?'B':'A';
+                byte[] changed=(originalText.substring(0,at)+replacement+originalText.substring(at+1)).getBytes(StandardCharsets.US_ASCII);
+                reject(()->AccountTransferCrypto.decrypt(changed,phrase),"authenticated salt/nonce mutation");
+            }
             for (String invalid : new String[]{
                     new String(expected, StandardCharsets.US_ASCII).replace("600000", "2147483647"),
                     new String(expected, StandardCharsets.US_ASCII).replace("\"version\":1", "\"version\":2"),
@@ -49,12 +56,17 @@ public final class AccountTransferCryptoCheck {
         reject(() -> AccountTransferCrypto.decrypt(new byte[AccountTransferCrypto.MAX_FILE_BYTES + 1], "SYNTHETIC-valid-pass".toCharArray()), "oversized envelope");
         reject(() -> AccountTransferCrypto.encrypt(plain, "short".toCharArray()), "short passphrase");
         reject(() -> AccountTransferCrypto.encrypt(plain, new char[]{'S','Y','N','T','H','E','T','I','C','\ud800'}), "unpaired surrogate");
+        char[] composed="SYNTHETIC-caf\u00e9".toCharArray(),decomposed="SYNTHETIC-cafe\u0301".toCharArray();
+        require(!Arrays.equals(AccountTransferCrypto.deriveKey(composed,new byte[16]),AccountTransferCrypto.deriveKey(decomposed,new byte[16])),"no Unicode normalization");
+        require(!Arrays.equals(AccountTransferCrypto.deriveKey(" SYNTHETIC-spaces ".toCharArray(),new byte[16]),AccountTransferCrypto.deriveKey("SYNTHETIC-spaces".toCharArray(),new byte[16])),"no passphrase trim");
+        char[] overUtf8=new char[400];Arrays.fill(overUtf8,'合');reject(()->AccountTransferCrypto.encrypt(plain,overUtf8),"UTF-8 byte bound, not character count");
         require(new String(plain, StandardCharsets.UTF_8).contains("SYNTHETIC_SESSION==%2F%3D%25+ONLY"), "raw Cookie marker fixture");
-        if (args.length > 1) {
+        {
             Properties vector = new Properties();
             try (var in = Files.newBufferedReader(root.resolve("unicode.properties"), StandardCharsets.UTF_8)) { vector.load(in); }
             char[] phrase = new String(Base64.getDecoder().decode(vector.getProperty("passphrase_utf8_base64")), StandardCharsets.UTF_8).toCharArray();
-            byte[] foreign = AccountTransferCrypto.decrypt(Files.readAllBytes(Path.of(args[1])), phrase);
+            Path foreignPath = args.length > 1 ? Path.of(args[1]) : root.resolve("rust-unicode.muse-account");
+            byte[] foreign = AccountTransferCrypto.decrypt(Files.readAllBytes(foreignPath), phrase);
             require(Arrays.equals(plain, foreign), "Rust-generated Unicode envelope consumed by real Java JCA");
             Arrays.fill(phrase, '\0'); Arrays.fill(foreign, (byte)0);
         }

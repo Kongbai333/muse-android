@@ -55,6 +55,14 @@ final class ProxyStore {
         return add(UUID.randomUUID().toString(), name, settings);
     }
 
+    String addImported(String name, ProxySettings settings) throws GeneralSecurityException, IOException {
+        if (name == null || name.trim().isEmpty() || name.codePointCount(0, name.length()) > 128
+                || name.getBytes(StandardCharsets.UTF_8).length > 512 || name.chars().anyMatch(Character::isISOControl)) {
+            throw new IOException("迁移代理名称无效。");
+        }
+        return insert(UUID.randomUUID().toString(), name, settings);
+    }
+
     String importLegacy(String accountId, String accountName, ProxySettings settings)
             throws GeneralSecurityException, IOException {
         String id = UUID.nameUUIDFromBytes(("muse-legacy-proxy:" + accountId).getBytes(StandardCharsets.UTF_8)).toString();
@@ -63,7 +71,12 @@ final class ProxyStore {
     }
 
     private String add(String id, String name, ProxySettings settings) throws GeneralSecurityException, IOException {
-        ProxyProfile profile = new ProxyProfile(id, cleanName(name), settings, sealCredentials(id, settings));
+        return insert(id, cleanName(name), settings);
+    }
+
+    private String insert(String id, String name, ProxySettings settings) throws GeneralSecurityException, IOException {
+        if (find(id) != null) throw new IOException("代理标识已存在，未覆盖已有配置。");
+        ProxyProfile profile = new ProxyProfile(id, name, settings, sealCredentials(id, settings));
         profiles.add(profile);
         if (!persist()) {
             profiles.remove(profile);
@@ -117,8 +130,9 @@ final class ProxyStore {
 
     private static String cleanName(String name) throws IOException {
         String value = name == null ? "" : name.trim();
-        if (value.isEmpty() || value.length() > 48 || value.chars().anyMatch(Character::isISOControl)) {
-            throw new IOException("代理名称必须为 1–48 个字符。");
+        if (value.isEmpty() || value.codePointCount(0, value.length()) > 128
+                || value.getBytes(StandardCharsets.UTF_8).length > 512 || value.chars().anyMatch(Character::isISOControl)) {
+            throw new IOException("代理名称必须为 1–128 个字符，且不超过 512 字节。");
         }
         return value;
     }

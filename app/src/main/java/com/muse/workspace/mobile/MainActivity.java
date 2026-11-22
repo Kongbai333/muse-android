@@ -64,6 +64,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private MobileStudio studio;
     private StudioResults studioResults;
     private boolean multiProfile;
+    private AccountTransferUi transferUi;
     private FrameLayout root, body, webFrame;
     private LinearLayout main;
     private AccountSidebar sidebar;
@@ -153,6 +154,17 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         } catch (RuntimeException ignored) {
             multiProfile = false;
         }
+        transferUi = new AccountTransferUi(this, accounts, proxies, browser, multiProfile, new AccountTransferUi.Host() {
+            @Override public boolean allowed() {
+                if (!ready || closing) return false;
+                if (studio.running() != null) { message("请先停止或等待当前生成结束，再迁移账号。"); return false; }
+                if (browser.checking()) { message("请等当前代理检查结束后再迁移账号。"); return false; }
+                return true;
+            }
+            @Override public void beforeTransfer() { syncStudioDraft(); quotas.cancel(); clearFile(); }
+            @Override public void imported() { importedAccounts(); }
+            @Override public void notice(String text) { message(text); }
+        });
         if (state != null) {
             screen = Math.max(STUDIO, Math.min(PROXIES, state.getInt("screen", STUDIO)));
             video = state.getBoolean("video");
@@ -1619,6 +1631,19 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         });
     }
 
+    @Override public void exportAccounts() { if (transferUi != null) transferUi.exportAccounts(); }
+    @Override public void importAccounts() { if (transferUi != null) transferUi.importAccounts(); }
+    @Override public void importCookieText() { if (transferUi != null) transferUi.importCookieText(); }
+
+    private void importedAccounts() {
+        // Imported candidates are already committed; no automatic quota worker runs before this point.
+        syncAccountOrder();
+        updateStudioAccount();
+        renderSidebar();
+        updateQuickSwitchFace();
+        showScreen(WEB);
+    }
+
     private void syncAccountOrder() {
         java.util.ArrayList<String> ids = new java.util.ArrayList<>();
         for (AccountStore.Account account : accounts.all()) ids.add(account.id);
@@ -1922,6 +1947,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (!ready) return;
+        if (transferUi != null && transferUi.onActivityResult(request, result, data)) return;
         if (request == SAVE_MEDIA) {
             File source = exporting == null ? null : studio.media(exporting);
             exporting = null;
@@ -2064,6 +2090,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override protected void onDestroy() {
         if (!ready) { super.onDestroy(); return; }
         closing = true;
+        if (transferUi != null) transferUi.close();
         dismissAccountMenu();
         clearFile();
         quotas.cancel();

@@ -1,4 +1,5 @@
 name: Android client
+run-name: ${{ github.workflow }} / ${{ inputs.build_request_id || github.ref_name }}
 
 on:
   push:
@@ -7,6 +8,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_request_id:
+        description: Optional build identifier (display only)
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -72,6 +79,9 @@ jobs:
       - name: Browser adapter contracts
         run: |
           node --test checks/check-observer.cjs
+          node --test checks/check-account-transfer-integration.cjs
+          node checks/check-account-transfer-store.cjs
+          node checks/check-account-transfer-json.cjs
           node checks/check-studio.cjs
           node checks/check-original-media.cjs
           node checks/check-reference-upload.cjs

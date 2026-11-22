@@ -25,7 +25,7 @@ final class ProxyEditor {
         if (existing != null) for (int i = 0; i < schemes.length; i++) if (schemes[i].equals(existing.scheme)) initial = i;
         int[] selectedScheme = {initial};
 
-        EditText title = ui.input("例如：家用代理", InputType.TYPE_CLASS_TEXT, 48);
+        EditText title = ui.input("例如：家用代理", InputType.TYPE_CLASS_TEXT, existing == null ? 48 : Math.max(48, existing.name.length()));
         if (existing != null) title.setText(existing.name);
         EditText host = ui.input("127.0.0.1", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI
             | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 280);

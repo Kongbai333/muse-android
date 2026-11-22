@@ -18,7 +18,7 @@ final class AccountEditor {
         MobileUi.Sheet sheet = ui.sheet(activity, account == null ? "添加账号" : "编辑账号",
             account == null ? "保存后打开网页登录 Muse，再点卡片上的刷新同步头像和套餐。"
                 : "改动的代理会在下次打开这个账号的网页时生效。");
-        EditText name = ui.input("例如：工作号", InputType.TYPE_CLASS_TEXT, 36);
+        EditText name = ui.input("例如：工作号", InputType.TYPE_CLASS_TEXT, account == null ? 36 : Math.max(36, account.name.length()));
         if (account != null) name.setText(account.name);
         sheet.add(ui.field(name, "账号名称"), 0);
 

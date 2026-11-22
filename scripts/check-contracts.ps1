@@ -24,4 +24,5 @@ foreach ($check in $checks) {
     if ($LASTEXITCODE -ne 0) { throw "Contract failed: $($check.BaseName)" }
 }
 & (Join-Path $repo 'checks/QuickSwitchCheck.ps1') -Java $java
+& (Join-Path $PSScriptRoot 'check-account-transfer-native.ps1') -JavaHome $env:JAVA_HOME
 Write-Output "All $($checks.Count) Java contract programs and the floating-switch checks passed."
