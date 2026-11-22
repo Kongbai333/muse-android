@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 颜色全部来自 muse_* 资源：values 为白昼，values-night 为暗房（默认）。 -->
+    <style name="MuseTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:windowLightStatusBar">@bool/muse_light_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/muse_light_bars</item>
+        <item name="android:statusBarColor">@color/muse_bg</item>
+        <item name="android:navigationBarColor">@color/muse_bg</item>
+        <item name="android:colorAccent">@color/muse_accent</item>
+        <item name="android:windowBackground">@color/muse_bg</item>
+        <item name="android:colorBackground">@color/muse_bg</item>
+        <item name="android:textColorPrimary">@color/muse_text</item>
+        <item name="android:textColorSecondary">@color/muse_text2</item>
+        <item name="android:textColorHint">@color/muse_muted</item>
+        <item name="colorPrimary">@color/muse_accent</item>
+        <item name="colorOnPrimary">@color/muse_on_accent</item>
+        <item name="colorPrimaryContainer">@color/muse_accent_soft</item>
+        <item name="colorOnPrimaryContainer">@color/muse_text</item>
+        <item name="colorSecondary">@color/muse_text2</item>
+        <item name="colorSecondaryContainer">@color/muse_raised</item>
+        <item name="colorOnSecondaryContainer">@color/muse_text</item>
+        <item name="colorTertiary">@color/muse_text2</item>
+        <item name="colorSurface">@color/muse_surface</item>
+        <item name="colorOnSurface">@color/muse_text</item>
+        <item name="colorSurfaceVariant">@color/muse_raised</item>
+        <item name="colorOnSurfaceVariant">@color/muse_text2</item>
+        <item name="colorOutline">@color/muse_line_strong</item>
+        <item name="colorOutlineVariant">@color/muse_line</item>
+        <item name="colorControlActivated">@color/muse_accent</item>
+        <item name="colorControlNormal">@color/muse_text2</item>
+        <item name="materialAlertDialogTheme">@style/MuseDialog</item>
+        <item name="bottomSheetDialogTheme">@style/MuseSheet</item>
+    </style>
+    <style name="MuseDialogShape" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">22dp</item>
+    </style>
+    <style name="MuseDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">@color/muse_surface</item>
+        <item name="colorOnSurface">@color/muse_text</item>
+        <item name="colorOnSurfaceVariant">@color/muse_text2</item>
+        <item name="android:colorBackground">@color/muse_surface</item>
+        <item name="android:windowBackground">@color/muse_surface</item>
+        <item name="android:textColorPrimary">@color/muse_text</item>
+        <item name="android:textColorSecondary">@color/muse_text2</item>
+        <item name="colorPrimary">@color/muse_accent</item>
+        <item name="colorControlActivated">@color/muse_accent</item>
+        <item name="colorSecondaryContainer">@color/muse_raised</item>
+        <item name="shapeAppearanceMediumComponent">@style/MuseDialogShape</item>
+        <item name="materialButtonStyle">@style/MuseDialogButton</item>
+    </style>
+    <style name="MuseDialogButton" parent="Widget.Material3.Button.TextButton">
+        <item name="android:textColor">@color/muse_text</item>
+        <item name="cornerRadius">10dp</item>
+    </style>
+    <style name="MuseSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/MuseSheetStyle</item>
+        <item name="android:navigationBarColor">@color/muse_surface</item>
+        <item name="android:windowLightNavigationBar">@bool/muse_light_bars</item>
+        <item name="colorPrimary">@color/muse_accent</item>
+    </style>
+    <style name="MuseSheetStyle" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@android:color/transparent</item>
+    </style>
+</resources>

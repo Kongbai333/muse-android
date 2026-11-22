@@ -1,0 +1,7 @@
+Muse Android
+
+Original application code is distributed under the MIT license.
+AndroidX, Material Components for Android and the Gradle Wrapper are distributed
+under Apache-2.0. Their authors retain the copyright in their respective work.
+Outline icon adaptations retain the Tabler Icons MIT notice in LICENSES/Tabler-MIT.txt.
+The vendored browser adapters retain the MUSE2API attribution in THIRD_PARTY_NOTICES.md.

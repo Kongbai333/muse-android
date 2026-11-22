@@ -1,0 +1,76 @@
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+android {
+    namespace 'com.muse.workspace.mobile'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'com.muse.workspace.mobile'
+        minSdk 26
+        targetSdk 35
+        versionCode 28
+        versionName '0.1.26'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        preview {
+            storeFile rootProject.file(System.getenv('MUSE_ANDROID_KEYSTORE') ?: '.build/preview.keystore')
+            storePassword System.getenv('MUSE_ANDROID_STORE_PASSWORD') ?: 'android'
+            keyAlias System.getenv('MUSE_ANDROID_KEY_ALIAS') ?: 'muse-preview'
+            keyPassword System.getenv('MUSE_ANDROID_KEY_PASSWORD') ?: 'android'
+        }
+    }
+
+    buildTypes {
+        preview {
+            initWith release
+            signingConfig signingConfigs.preview
+        }
+    }
+}
+
+// Browser adapters live in app/src/main/assets so this repository builds alone.
+def legalAssets = layout.buildDirectory.dir('generated/legalAssets')
+tasks.register('syncLegalNotices', Sync) {
+    from(rootProject.file('LICENSE'))
+    from(rootProject.file('NOTICE'))
+    from(rootProject.file('THIRD_PARTY_NOTICES.md'))
+    from(rootProject.file('LICENSES')) { into 'LICENSES' }
+    into(legalAssets.map { it.dir('legal') })
+}
+android.sourceSets.main.assets.srcDir(legalAssets)
+tasks.named('preBuild').configure { dependsOn('syncLegalNotices') }
+
+// Export the actual compiler classpath instead of guessing Gradle cache paths.
+tasks.register('writeContractCheckClasspath') {
+    dependsOn('compileDebugJavaWithJavac')
+    doLast {
+        def compiler = tasks.named('compileDebugJavaWithJavac', JavaCompile).get()
+        def output = layout.buildDirectory.file('contract-check-classpath.txt').get().asFile
+        output.parentFile.mkdirs()
+        output.setText(files(compiler.destinationDirectory, compiler.classpath, android.bootClasspath).asPath, 'UTF-8')
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.webkit:webkit:1.9.0'
+    implementation 'androidx.core:core:1.9.0'
+    constraints {
+        implementation 'androidx.annotation:annotation:1.3.0'
+        implementation 'androidx.collection:collection:1.1.0'
+        implementation 'androidx.concurrent:concurrent-futures:1.1.0'
+        implementation 'androidx.lifecycle:lifecycle-runtime:2.6.1'
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+        implementation 'org.jetbrains.kotlin:kotlin-stdlib-common:1.8.22'
+    }
+}

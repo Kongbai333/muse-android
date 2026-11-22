@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 白昼：浅色主题。暗房色板见 values-night/colors.xml。 -->
+    <color name="muse_bg">#FFF4F3EF</color>
+    <color name="muse_surface">#FFFFFFFF</color>
+    <color name="muse_raised">#FFEAE9E4</color>
+    <color name="muse_line">#14141413</color>
+    <color name="muse_line_strong">#2B141413</color>
+    <color name="muse_text">#FF141413</color>
+    <color name="muse_text2">#FF5C5B57</color>
+    <color name="muse_muted">#FF9A9893</color>
+    <color name="muse_accent">#FFE5461A</color>
+    <color name="muse_on_accent">#FFFFFFFF</color>
+    <color name="muse_accent_soft">#1AE5461A</color>
+    <color name="muse_scrim">#5C141413</color>
+    <color name="muse_chrome">@color/muse_bg</color>
+</resources>

@@ -1,0 +1,14 @@
+/.build/
+/.gradle/
+/app/build/
+/local.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+/.backup/
+/dist/
+/.env
+/.env.*
+*.log
+*.bak
