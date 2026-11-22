@@ -78,6 +78,10 @@ node checks/check-original-media.cjs
 node checks/check-reference-upload.cjs
 ```
 
+## 社区致谢
+
+感谢 [LINUX DO](https://linux.do/) 社区的交流与分享。本项目认可并支持 LINUX DO 社区的开源交流与互助。
+
 ## 许可证
 
 原创代码采用 MIT。AndroidX、Material Components 和 Gradle Wrapper 保留 Apache-2.0 许可；
