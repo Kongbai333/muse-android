@@ -119,3 +119,41 @@ test('polish: label details are read-only native message dialogs with inert clos
   public static void main(String[] args){PolishLabelDialogHarness h=new PolishLabelDialogHarness();h.showLabelDetails("邀请信息","SYNTH6\\n剩余0次");if(!MobileUi.shown.text.contains("SYNTH6")||!MobileUi.shown.text.contains("0"))throw new AssertionError("full text retained");System.out.println("Actual read-only label dialog boundary passed; no file/network/account operation.");}
  }`);
 });
+
+test('values-copy: actual card update is inert until click, copies only full code, and handles unavailable clipboard honestly',()=>{
+ const source=fs.readFileSync(path.join(base,'QuotaCard.java'),'utf8');
+ const copy=source.includes('private void copyInviteCode(')?method('QuotaCard.java','private void copyInviteCode('):'';
+ javaCheck('CardValuesCopyHarness',`import java.text.SimpleDateFormat;
+ public final class CardValuesCopyHarness{
+  static final int INK=1,ACCENT=2;static final class Gravity{static final int END=1;}
+  interface Click{void run(View v);}interface LongClick{boolean run(View v);}
+  static class View{static final int GONE=8,VISIBLE=0;Click click;LongClick longClick;String description="";void setAlpha(float n){}void setContentDescription(String s){description=s;}void setOnClickListener(Click c){click=c;}void setOnLongClickListener(LongClick c){longClick=c;}}
+  static final class TextView extends View{String text="",tooltip="";void setText(String s){text=s;}String getText(){return text;}void setTooltipText(CharSequence s){tooltip=s.toString();}void setTextColor(int n){}void setVisibility(int n){}}
+  static final class LinearLayout extends View{}
+  static final class ClipData{String label,text;static ClipData newPlainText(CharSequence label,CharSequence text){ClipData c=new ClipData();c.label=label.toString();c.text=text.toString();return c;}}
+  static final class ClipboardManager{int writes;String written="UNCHANGED SYNTHETIC";boolean fail;void setPrimaryClip(ClipData data){if(fail)throw new SecurityException("synthetic unavailable");writes++;written=data.text;}}
+  static final class Context{ClipboardManager clipboard=new ClipboardManager();int requests;<T>T getSystemService(Class<T> type){requests++;if(type!=ClipboardManager.class)throw new AssertionError("unexpected service");return type.cast(clipboard);}}
+  static final class Toast{static final int LENGTH_SHORT=0;static String shown="";String text;Toast(String s){text=s;}static Toast makeText(Context c,String s,int duration){return new Toast(s);}void show(){shown=text;}}
+  static final class Builder{String title,text;Builder setTitle(String s){title=s;return this;}Builder setMessage(String s){text=s;return this;}Builder setPositiveButton(String s,Object listener){if(listener!=null)throw new AssertionError("close must be inert");return this;}void show(){MobileUi.shown=this;}}
+  static final class MobileUi{static Builder shown;static Builder dialog(Context c){return new Builder();}static void setTicks(View v,Double used,boolean known){}}
+  final Context context=new Context();final TextView week=new TextView(),reset=new TextView(),extraLabel=new TextView(),inviteLabel=new TextView(),note=new TextView();final View ticks=new View();final LinearLayout view=new LinearLayout();final Consumer<String> planChanged=plan->{};
+  ${method('QuotaCard.java','void update(')}
+  ${method('QuotaCard.java','private void showLabelDetails(')}
+  ${copy}
+  static int checks;static void require(boolean ok,String why){checks++;if(!ok)throw new AssertionError(why);}
+  static Map<String,Object> map(Object... v){Map<String,Object> m=new LinkedHashMap<>();for(int i=0;i<v.length;i+=2)m.put((String)v[i],v[i+1]);return m;}
+  static AccountCardState card(String code,long now){Map<String,Object> invite=map("code",code,"use_count",1L,"max_uses",30L,"observed_at",now);return AccountCardState.read(map(),now).merge(map("invite",invite),now);}
+  public static void main(String[] args){CardValuesCopyHarness h=new CardValuesCopyHarness();long now=System.currentTimeMillis();String full="SYNTHETICCODE123";h.update(card(full,now),"额度已同步");ClipboardManager clipboard=h.context.clipboard;
+   require(clipboard.writes==0&&h.context.requests==0,"rendering never writes or reads clipboard");
+   h.inviteLabel.click.run(h.inviteLabel);require(clipboard.writes==1&&clipboard.written.equals(full),"tap must copy exact full code, not rendered label/ratio/prefix");
+   require(h.inviteLabel.text.equals("SYNTHETICCODE123 1/30"),"actual rendered label uses real code and ratio");
+   require(Toast.shown.contains("已复制"),"success follows actual completed clipboard write");require(MobileUi.shown==null,"normal tap copies directly rather than opening details");
+   require(h.inviteLabel.description.contains(full)&&h.inviteLabel.description.contains("复制"),"full code and copy semantics remain accessible");
+   require(h.inviteLabel.longClick!=null&&h.inviteLabel.longClick.run(h.inviteLabel)&&MobileUi.shown.text.contains(full),"long press retains full read-only details");require(clipboard.writes==1,"opening details does not copy again");
+   h.update(card("",now),"未更新");Toast.shown="";h.inviteLabel.click.run(h.inviteLabel);require(clipboard.writes==1&&clipboard.written.equals(full)&&!Toast.shown.contains("已复制"),"unknown code leaves clipboard untouched without success claim");
+   h.update(card(full,now),"额度已同步");h.context.clipboard=null;Toast.shown="";h.inviteLabel.click.run(h.inviteLabel);require(!Toast.shown.contains("已复制")&&clipboard.writes==1,"missing service cannot claim success or change clip");
+   h.context.clipboard=clipboard;clipboard.fail=true;Toast.shown="";h.inviteLabel.click.run(h.inviteLabel);require(!Toast.shown.contains("已复制")&&clipboard.writes==1&&clipboard.written.equals(full),"system write failure is caught and cannot claim success");
+   clipboard.fail=false;AccountCardState other=card("SECOND7",now);h.update(other,"额度已同步");require(clipboard.writes==1,"new account rendering does not copy automatically");h.inviteLabel.click.run(h.inviteLabel);require(clipboard.writes==2&&clipboard.written.equals("SECOND7"),"rebound label copies current account code only");
+   System.out.println("Actual card/clipboard boundary: "+checks+" synthetic checks passed; no real clipboard or Android rendering.");}
+ }`,['AccountCardState.java','AccountQuota.java','AccountCardLabels.java']);
+});

@@ -1,10 +1,14 @@
 package com.muse.workspace.mobile;
 
 import android.content.Context;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -50,12 +54,13 @@ final class QuotaCard {
 
         LinearLayout invitation = ui.row();
         invitation.setBaselineAligned(true);
-        extraLabel = label(ui, "额外 —");
+        extraLabel = label(ui, "额外 —/—");
         LinearLayout.LayoutParams extraPosition = new LinearLayout.LayoutParams(0, -2, 1);
         extraPosition.setMarginEnd(ui.dp(8));
         invitation.addView(extraLabel, extraPosition);
-        inviteLabel = label(ui, "邀请码 —/—");
-        invitation.addView(inviteLabel, new LinearLayout.LayoutParams(0, -2, 1));
+        inviteLabel = label(ui, "待获取 —/30");
+        inviteLabel.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        invitation.addView(inviteLabel, new LinearLayout.LayoutParams(0, -2, 1.4f));
         note = ui.text("待同步", 11, MUTED, false);
         ui.block(view, invitation, 7);
         ui.block(view, note, 5);
@@ -87,9 +92,11 @@ final class QuotaCard {
         extraLabel.setTooltipText(extraDetails);
         extraLabel.setOnClickListener(ignored -> showLabelDetails("额外额度", extraDetails));
         inviteLabel.setText(inviteText);
-        inviteLabel.setContentDescription(inviteText + "，点按查看真实邀请码、剩余次数和成功时间");
+        String code = card.inviteCode();
+        inviteLabel.setContentDescription(inviteText + (code.isEmpty() ? "，邀请码待获取" : "，点按复制完整邀请码") + "，长按查看剩余次数和成功时间");
         inviteLabel.setTooltipText(inviteDetails);
-        inviteLabel.setOnClickListener(ignored -> showLabelDetails("邀请信息", inviteDetails));
+        inviteLabel.setOnClickListener(ignored -> copyInviteCode(code));
+        inviteLabel.setOnLongClickListener(ignored -> { showLabelDetails("邀请信息", inviteDetails); return true; });
         long at = data == null ? card.lastSuccess() : data.observed();
         String when = at <= 0 ? "" : " · 上次 " + new SimpleDateFormat("M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(at));
         String sync = current ? "额度已同步" : state.startsWith("未更新") || state.contains("同步中") || state.contains("登录") || state.startsWith("部分") ? state : "未更新";
@@ -109,5 +116,24 @@ final class QuotaCard {
 
     private void showLabelDetails(String title, String text) {
         MobileUi.dialog(context).setTitle(title).setMessage(text).setPositiveButton("关闭", null).show();
+    }
+
+    private void copyInviteCode(String code) {
+        if (code == null || code.isEmpty()) {
+            Toast.makeText(context, "邀请码待获取", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
+            if (clipboard == null) {
+                Toast.makeText(context, "无法使用剪贴板", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            clipboard.setPrimaryClip(ClipData.newPlainText("Muse 邀请码", code));
+        } catch (RuntimeException unavailable) {
+            Toast.makeText(context, "无法复制邀请码", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(context, "已复制邀请码", Toast.LENGTH_SHORT).show();
     }
 }
