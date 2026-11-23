@@ -8,8 +8,10 @@ import java.util.Locale;
 
 /** Read-only label presentation. Unknowns and independently cached observations stay distinct. */
 final class AccountCardLabels {
+    private static final long MAX_SAFE_TOKENS=(1L<<53)-1;
+
     static String extra(AccountCardState card) {
-        return "额外 "+compact(consumed(card))+"/"+compact(card.extraTotal());
+        return "额外 "+compact(consumed(card))+"/"+compact(tokens(card.extraTotal()));
     }
 
     static String invitation(AccountCardState card) {
@@ -18,10 +20,10 @@ final class AccountCardLabels {
     }
 
     static String extraDetails(AccountCardState card) {
-        return "已消耗："+number(consumed(card))+"\n按总量 − 剩余额度计算；来源缺失或矛盾时为未知"
-            +"\n\n剩余额度："+number(card.extraRemaining())+time(card.observed("extra_remaining"))
-            +"\n\n总量："+number(card.extraTotal())+time(card.observed("extra_total"))
-            +"\n数值来源：topupBalance 为余量，topupTotal 为总量"
+        return "已消耗口令："+number(consumed(card))+"\n按25 ×（原始总量 − 原始余量）计算；来源缺失、非法或溢出时为未知"
+            +"\n\n剩余口令："+number(tokens(card.extraRemaining()))+time(card.observed("extra_remaining"))
+            +"\n\n总口令："+number(tokens(card.extraTotal()))+time(card.observed("extra_total"))
+            +"\n数值来源：topupBalance 为原始余量，topupTotal 为原始总量；1额度单位=25口令"
             +"\n\n原显示："+(card.extraDisplay().isEmpty()?"未知":card.extraDisplay())+time(card.observed("extra_display"));
     }
 
@@ -34,10 +36,15 @@ final class AccountCardLabels {
             +"\n\n已赚取："+(card.inviteEarned().isEmpty()?"未知":card.inviteEarned())+time(card.observed("invite_earned"));
     }
 
-    private static Double consumed(AccountCardState card){
-        Double total=card.extraTotal(),remaining=card.extraRemaining();
+    private static Long consumed(AccountCardState card){
+        Long total=tokens(card.extraTotal()),remaining=tokens(card.extraRemaining());
         if(total==null||remaining==null||remaining>total)return null;
-        return BigDecimal.valueOf(total).subtract(BigDecimal.valueOf(remaining)).doubleValue();
+        return total-remaining;
+    }
+
+    private static Long tokens(Double raw){
+        if(raw==null||!Double.isFinite(raw)||raw<0||raw!=Math.floor(raw)||raw>MAX_SAFE_TOKENS/25)return null;
+        return raw.longValue()*25;
     }
 
     static boolean cached(AccountCardState card,long now,long quotaObserved) {
@@ -49,8 +56,8 @@ final class AccountCardLabels {
     }
 
     private static String count(Long n){return n==null?"—":n.toString();}
-    private static String number(Double n){return n==null?"未知":BigDecimal.valueOf(n).stripTrailingZeros().toPlainString();}
-    private static String compact(Double n){
+    private static String number(Long n){return n==null?"未知":n.toString();}
+    private static String compact(Long n){
         if(n==null)return "—";
         BigDecimal value=BigDecimal.valueOf(n);
         if(n>=100000000)return value.divide(BigDecimal.valueOf(100000000),2,RoundingMode.DOWN).stripTrailingZeros().toPlainString()+"亿";
