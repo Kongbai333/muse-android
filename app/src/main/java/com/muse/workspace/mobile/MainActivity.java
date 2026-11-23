@@ -61,6 +61,16 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private MuseWeb browser;
     private WebMicrophone microphone;
     private QuotaSync quotas;
+    private final Handler quotaHandler = new Handler(Looper.getMainLooper());
+    private boolean foreground;
+    private String loginPageOwner = "";
+    private final Runnable quotaPulse = new Runnable() {
+        @Override public void run() {
+            if (!foreground || !ready || closing) return;
+            syncCurrentQuota();
+            quotaHandler.postDelayed(this, 60_000);
+        }
+    };
     private MobileStudio studio;
     private StudioResults studioResults;
     private boolean multiProfile;
@@ -666,7 +676,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
     private void syncCurrentQuota() {
         AccountStore.Account account = current();
-        if (account != null && studio.running() == null) quotas.refresh(account, multiProfile, false);
+        if (foreground && ready && account != null && studio.running() == null && !browser.checking() && !browser.transferring())
+            quotas.refresh(account, multiProfile, false);
     }
 
     @Override public void openStudio() {
@@ -1716,6 +1727,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     private void proxyChanged(ProxyProfile profile) {
+        quotas.cancel(); // A response from the previous route must not update the new route's card.
         AccountStore.Account selected = current();
         boolean affectsCurrent = profile != null && selected != null && profile.id.equals(selected.proxyId());
         if (profile != null) {
@@ -1890,6 +1902,14 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (screen != WEB || webFrame == null) return;
         AccountStore.Account account = current();
         String url = browser.url();
+        if (account != null && url != null && browser.isOpen(account.id)) {
+            if (StudioDraft.loginPage(url)) loginPageOwner = account.id;
+            else if (loginPageOwner.equals(account.id) && StudioDraft.trustedUrl(url) && !browser.loading()) {
+                loginPageOwner = "";
+                quotas.loginReady(account.id);
+                syncCurrentQuota();
+            }
+        }
         String host = url == null ? null : Uri.parse(url).getHost();
         ProxyProfile routeProfile = account == null ? null : proxies.find(account.proxyId());
         String route = browser.usingProxy() ? " · " + (routeProfile == null ? "代理" : routeProfile.name) : "";
@@ -2074,6 +2094,20 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override public void onLowMemory() {
         super.onLowMemory();
         if (ready && browser != null) browser.trimParked(0);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        foreground = true;
+        quotaHandler.removeCallbacks(quotaPulse);
+        quotaPulse.run();
+    }
+
+    @Override protected void onPause() {
+        foreground = false;
+        quotaHandler.removeCallbacks(quotaPulse);
+        if (quotas != null) quotas.cancel();
+        super.onPause();
     }
 
     @Override protected void onStop() {

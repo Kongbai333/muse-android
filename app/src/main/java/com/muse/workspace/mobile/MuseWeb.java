@@ -125,6 +125,7 @@ final class MuseWeb {
     boolean loading() { return loading || preparing(); }
     boolean preparing() { return wantsBrowser && view == null && (preparing || routeReady); }
     boolean usingProxy() { return usingProxy; }
+    boolean transferring() { return transferActive; }
     boolean canGoBack() { return view != null && view.canGoBack(); }
 
     void open(AccountStore.Account selected, boolean profiles) {

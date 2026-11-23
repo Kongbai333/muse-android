@@ -1,0 +1,50 @@
+# Android Card Refresh Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. No helpers per dispatch.
+
+**Goal:** Preserve last successful card fields/times on transient failures and refresh the current account automatically without changing its route.
+**Architecture:** A bounded pure-Java field cache feeds the existing native card; the observer retains trusted origin/session generations and bounded named-action retry; QuotaSync remains the sole native probe owner.
+**Tech Stack:** Existing Java17/Android26+, AndroidX WebView, strict generic JSON helper and Node/Java contracts; no new runtime dependency.
+**Spec:** docs/superpowers/specs/2026-11-23-card-refresh-design.md
+
+## Global Constraints
+
+- No real credentials/profiles/auth requests or invite reveal/claim/generation, no new Muse HTTP client, no push/main/tag/dispatch/release.
+- Preserve0.1.27/code29, original static proxy/profile isolation and frozen encrypted protocol.
+- Missing/unavailable source cannot be called complete automatic hidden invite retrieval; public model alone is not an endpoint contract.
+- User authorized owner defaults and inline work; no additional approval or helper review.
+
+## Review Focus
+
+- Partial fields must not fabricate success time for old independent fields.
+- Valid0/unlimited and old-cycle values must remain distinct from unknown/current values.
+- Deletion/route change/logout and late callbacks must not contaminate another account.
+- No added code clicks or requests an unverified invite action.
+- Automatic current-account work must respect studio/transfer/proxy/lifecycle gates.
+
+### Task1: Persistent independent field model and stale display
+
+Files: new AccountCardState.java, checks/AccountCardStateCheck.java; modify AccountQuota.java, checks/MobileParityCheck.java.
+Interfaces: AccountCardState.read(Map<String,Object>,long), merge(Map<String,Object>,long):AccountCardState, rows():Map<String,Object>, quota(long), inviteCode(), inviteRemaining(), observed(String), lastSuccess(); old AccountQuota.read signature retained. QuotaSync bridges its existing JSONObject codec, so the integer-only transfer JSON/wire is not changed to accept quota decimals.
+
+- [x] Write failing synthetic checks for legacy migration, transient empty merge/time preservation, partial quota/extra/invite, valid0/unlimited, old timestamps and stale/cross-cycle labels; run focused javac/java RED.
+- [x] Implement validated per-field timestamp model and visible stale semantics; run same GREEN (18 checks).
+
+### Task2: Observer status, bounded retry and passive invitation
+
+Files: muse-observer.js, checks/check-observer.cjs (targeted appended tests).
+Interfaces: snapshot still returns quota/status/avatar; add safe explicit fields and invite status, retain existing module exports and origin/sessionEpoch.
+
+- [x] Write failing Node behavior cases for403 keeping quota,429 no immediate retry, named-action discovery retry limits and no invite click; run only new cases RED.
+- [x] Implement bounded policy and passive extraction, preserving proven subscription payload semantics; run focused GREEN. Record unproven hidden invite reader separately.
+
+### Task3: Native merge, card state and current-account scheduling
+
+Files: QuotaSync.java, QuotaCard.java, MainActivity.java, AccountSidebar.java; narrow native/source checks.
+Interfaces: QuotaSync.card(String):AccountCardState; existing value/state retained; refresh/cancel/remove preserve generation ownership; host calls one current-account automatic path.
+
+- [x] Add RED checks for native persistence using field model, invite receipt, cancellation/timeout ownership and foreground gating.
+- [x] Wire independent merges and stale labels, serialize evaluation, invalidate canceled callbacks; add lifecycle/current-account throttled triggers without background account switching; GREEN focused checks (4 source boundaries; 13 real pure-Java retry policy cases). Full observer plus native boundaries:28 pass.
+- [x] Review diff and prepare the separate #15 commit, update android-findings with exact source limitations, then proceed to #16. Targeted javac against the real existing Android/AndroidX compile classpath succeeded; final Gradle/native build and mandatory existing contracts remain deferred until both additions are complete.
+
+Ruling: narrow QuotaRefreshPolicy owns monotonic request budgets and is host-testable; native QuotaSync still exclusively owns page/probe/cache. A429 or403 pauses automatic attempts;3 ordinary failures pause automatic retries, manual action can reset budget after hard Retry-After. Explicit login transition resumes auth pause. This adds no timer/network client and avoids endless current-account polling.

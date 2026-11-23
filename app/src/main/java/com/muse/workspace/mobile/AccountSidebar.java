@@ -523,7 +523,7 @@ final class AccountSidebar extends FrameLayout {
 
     void updateQuota(String id, QuotaSync quotas) {
         QuotaCard card = cards.get(id);
-        if (card != null) card.update(quotas.value(id), quotas.state(id));
+        if (card != null) card.update(quotas.card(id), quotas.state(id));
     }
 
     void updateAvatar(String id, android.graphics.Bitmap image) {

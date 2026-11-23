@@ -27,7 +27,7 @@
       && !('subscription_type' in s) && !('usageRowLabel' in s) && !('usage_row_label' in s))) return null;
     const resets_at = resetTime(u.resetsAt ?? u.resets_at);
     const extra=parseExtra(s);
-    const attach=result=>({...result,plan_label:planLabel(s),...(extra?{extra}:{})});
+    const attach=result=>({...result,...(explicitPlanLabel(s)?{plan_label:explicitPlanLabel(s)}:{}),...(extra?{extra}:{})});
     if (u.state === 'UNLIMITED') return attach({state:'unlimited',resets_at});
     const one = u.percentUsed, two = u.percent_used;
     if (one !== undefined && two !== undefined && one !== two) return null;
@@ -86,6 +86,41 @@
     const match=/\.A\((\d+)\)\.then\(\s*\(\s*\{\s*preloadHatchSettingsData\b/.exec(source);
     return match ? Number(match[1]) : null;
   }
+  function parseInviteModel(node){
+    if(!node || typeof node!=='object' || Array.isArray(node) || !('code' in node) || !('max_uses' in node) || !('use_count' in node))return null;
+    const integer=v=>v===null || v===undefined || Number.isSafeInteger(v) && v>=0;
+    if(![node.max_uses,node.use_count,node.uses_remaining].every(integer))return null;
+    if(node.max_uses>0 && node.use_count>node.max_uses)return null;
+    const out={};
+    if(node.code!==null && node.code!==undefined){if(typeof node.code!=='string' || !/^[A-Z0-9]{6,16}$/.test(node.code.trim().toUpperCase()))return null;out.code=node.code.trim().toUpperCase();}
+    if(node.uses_remaining!==null && node.uses_remaining!==undefined)out.remaining=node.uses_remaining;
+    return Object.keys(out).length?out:null;
+  }
+  function parseCardResponse(text){
+    const result={quota:parseResponse(text),plan:null,extra:null,invite:null};
+    if(typeof text!=='string' || text.length>MAX_PAYLOAD)return result;
+    const visit=(node,depth=0)=>{
+      if(!node || typeof node!=='object' || depth>5)return;
+      const s=node.subscription && typeof node.subscription==='object'?node.subscription:node;
+      if(s.usage && typeof s.usage==='object' && ('subscriptionType' in s || 'subscription_type' in s || 'usageRowLabel' in s || 'usage_row_label' in s)){
+        const label=explicitPlanLabel(s);if(label)result.plan={label};const extra=parseExtra(s);if(extra)result.extra=extra;
+      }
+      const invite=parseInviteModel(node);if(invite)result.invite=invite;
+      const children=Array.isArray(node)?node.slice(0,16):['subscription','data','result','value','invite','invitation'].filter(k=>k in node).map(k=>node[k]);
+      for(const child of children)visit(child,depth+1);
+    };
+    try{visit(JSON.parse(text));}catch{
+      for(const line of text.split('\n').slice(0,100))if(/^[0-9a-f]{1,8}:(\{|\[)/i.test(line))try{visit(JSON.parse(line.slice(line.indexOf(':')+1)));}catch{}
+    }
+    return result;
+  }
+  function retryDelay(code,failures,retryAfter=0){
+    if(['logged_out','forbidden','unsupported'].includes(code))return null;
+    if(code==='rate_limited')return Math.min(3600000,Math.max(90000,Number.isFinite(retryAfter)?retryAfter*1000:0));
+    if(code==='ok')return 90000;
+    if(failures>=3)return null;
+    return code==='not_found'?1000*Math.max(1,failures):2000*Math.max(1,failures);
+  }
   function visible(root,element) {
     if (!element) return false;
     const rect=element.getBoundingClientRect();
@@ -104,11 +139,12 @@
         .slice(0,50).some(element => visible(root,element));
     } catch { return false; }
   }
-  function planLabel(s){
+  function explicitPlanLabel(s){
     const tier=typeof s?.tier?.name==='string'?s.tier.name.trim():'';
     if(tier && tier.length<=32 && !/[\u0000-\u001f]/.test(tier))return tier;
-    return ({FREE:'免费版',PAID:'订阅版',COMPLIMENTARY:'赠送版'})[s?.subscriptionType ?? s?.subscription_type] || '套餐';
+    return ({FREE:'免费版',PAID:'订阅版',COMPLIMENTARY:'赠送版'})[s?.subscriptionType ?? s?.subscription_type] || null;
   }
+  function planLabel(s){return explicitPlanLabel(s)||'套餐';}
   function captureAvatar(root){
     const selectors=[
       '[data-hatch-avatar-host]:not([data-hatch-avatar-host-hidden="true"]) video',
@@ -180,59 +216,22 @@
     }
     return null;
   }
-  const api = {parseSubscription,parseResponse,discoverAction,discoverPreload,trusted,contentReady,planLabel,captureAvatar,parseInvite};
+  const api = {parseSubscription,parseResponse,parseCardResponse,parseInviteModel,retryDelay,discoverAction,discoverPreload,trusted,contentReady,planLabel,captureAvatar,parseInvite};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof window === 'undefined' || window !== window.top || window.__museDesktopObserver) return;
   const root=window;
   const nativeFetch=root.fetch.bind(root);
-  let quota=null, action=null, busy=false, lastAttempt=0, scanned=0, lastCode='waiting';
+  let quota=null, action=null, busy=false, scanned=0, lastCode='waiting';
+  let cardPlan=null,cardExtra=null,failures=0,nextAllowed=0,rateLimitUntil=0,requestSerial=0,activeController=null;
   let sessionEpoch=0, wasLoggedOut=false, avatar=null, avatarChecked=0;
   let avatarRecording=null;
-  let invite=null, inviteChecked=0, inviteBusy=false, lastInput=0;
-  // Real user input on this page. Automatic invite reads wait until the page
-  // has been idle, so the popover never opens under someone's cursor or typing.
-  for (const type of ['pointerdown','keydown','wheel']) {
-    root.addEventListener(type,event=>{ if(event.isTrusted) lastInput=Date.now(); },true);
-  }
-  function inviteTrigger(){
-    for(const el of Array.from(document.querySelectorAll('button,[role="button"],a')).slice(0,400)){
-      const text=(el.innerText||el.textContent||'').trim();
-      const label=(el.getAttribute('aria-label')||'').trim();
-      if((['邀请','Invite'].includes(text) || ['邀请','Invite'].includes(label)) && visible(root,el))return el;
-    }
-    return null;
-  }
-  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  // Opens the site's own invite popover, reads it and closes it again.
+  let invite=null, inviteChecked=0;
+  // Passive only. A visible dialog or a proven payload is not a hidden read API.
   async function refreshInvite(){
-    if(inviteBusy || !trusted(location.href) || wasLoggedOut || !contentReady(root))return 'skip';
-    if(Date.now()-lastInput<20000)return 'user_active';
+    if(!trusted(location.href) || wasLoggedOut || !contentReady(root))return 'skip';
     const open=parseInvite(root);
     if(open){invite={...open,observed_at:Date.now()};return 'ok';}
-    const trigger=inviteTrigger();
-    if(!trigger)return 'no_trigger';
-    inviteBusy=true;
-    const focused=document.activeElement;
-    let found=null;
-    try{
-      trigger.click();
-      for(let i=0;i<20 && !found;i++){await pause(150);found=parseInvite(root);}
-      if(found)invite={...found,observed_at:Date.now()};
-    }catch{}
-    finally{
-      try{
-        if(parseInvite(root) && document.contains(trigger))trigger.click();
-        await pause(250);
-        if(parseInvite(root)){
-          const target=document.activeElement||document.body;
-          target.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true,cancelable:true}));
-        }
-        if(focused && focused!==document.body && document.contains(focused) && typeof focused.focus==='function')
-          focused.focus({preventScroll:true});
-      }catch{}
-      inviteBusy=false;
-    }
-    return found?'ok':'not_found';
+    return 'not_available';
   }
   function stopAvatarRecording(discard=false) {
     if(avatarRecording?.timer != null)root.clearInterval(avatarRecording.timer);
@@ -256,10 +255,14 @@
   let preload=null, settingsLoaded=false, moduleContext=null;
   const seenScripts=new Set();
   const accept=(text,epoch=sessionEpoch) => {
-    if (epoch !== sessionEpoch || wasLoggedOut) return false;
-    const found=parseResponse(text);
-    if (found) { quota={...found,observed_at:Date.now()}; lastCode='ok'; }
-    return !!found;
+    if (epoch !== sessionEpoch || wasLoggedOut || !trusted(location.href)) return false;
+    const found=parseCardResponse(text),at=Date.now();
+    if(found.quota)quota={...found.quota,observed_at:at};
+    if(found.plan)cardPlan={...found.plan,observed_at:at};
+    if(found.extra)cardExtra={...found.extra,observed_at:at};
+    if(found.invite)invite={...found.invite,observed_at:at};
+    if(found.quota)lastCode='ok';else if(found.plan || found.extra || found.invite)lastCode='partial';
+    return !!found.quota;
   };
   async function boundedText(response,limit=MAX_PAYLOAD) {
     const length=Number(response.headers.get('content-length'));
@@ -323,29 +326,42 @@
     settingsLoaded=true;
   }
   async function refresh(force=false) {
-    if (!trusted(location.href) || busy || (!force && Date.now()-lastAttempt < 90000)) return;
-    busy=true; lastAttempt=Date.now(); lastCode='syncing';
+    if (!trusted(location.href) || busy || Date.now()<rateLimitUntil || (!force && Date.now()<nextAllowed)) return;
+    if(force)failures=0;
+    busy=true;lastCode='syncing';
     const epoch=sessionEpoch;
+    const serial=++requestSerial;
     const controller=new AbortController();
+    activeController=controller;
     const timer=setTimeout(()=>controller.abort(),20000);
+    let code='request_failed',retryAfter=0;
     try {
       if (!action) action=await discover(controller.signal);
       if (!action && preload !== null) {
         await loadObservedSettings(controller.signal);
         action=await discover(controller.signal);
       }
-      if (!action) { lastCode='not_found'; return; }
+      if (!action) { code='not_found'; return; }
       const response=await nativeFetch(location.href,{
         method:'POST',credentials:'same-origin',signal:controller.signal,
         headers:{'Next-Action':action,'Accept':'text/x-component','Content-Type':'text/plain;charset=UTF-8'},
         body:'[{"includeAgreement":true}]',
       });
       if (epoch !== sessionEpoch || wasLoggedOut) return;
-      if (response.status === 401 || response.status === 403) { quota=null; lastCode='logged_out'; return; }
-      if (!response.ok) { lastCode='request_failed'; return; }
-      if (!accept(await boundedText(response),epoch) && epoch === sessionEpoch) lastCode='unrecognized';
-    } catch { lastCode='request_failed'; }
-    finally { clearTimeout(timer); busy=false; }
+      if (response.status === 401) { quota=null;cardPlan=cardExtra=invite=null;code='logged_out';return; }
+      if (response.status === 403) { code='forbidden';return; }
+      if (response.status === 429) { code='rate_limited';const raw=response.headers.get('retry-after');retryAfter=/^\d+$/.test(raw||'')?Number(raw):Math.max(0,(Date.parse(raw)-Date.now())/1000);return; }
+      if (!response.ok) return;
+      const matched=accept(await boundedText(response),epoch);code=matched?'ok':lastCode==='partial'?'partial':'unrecognized';
+    } catch { code='request_failed'; }
+    finally {
+      clearTimeout(timer);
+      if(epoch===sessionEpoch && serial===requestSerial && !wasLoggedOut){
+        busy=false;activeController=null;lastCode=code;failures=code==='ok'?0:failures+1;
+        const delay=retryDelay(code,failures,retryAfter);nextAllowed=delay===null?Infinity:Date.now()+delay;
+        if(code==='rate_limited')rateLimitUntil=nextAllowed;
+      }
+    }
   }
   if (trusted(location.href)) {
     root.fetch=function(...args) {
@@ -375,8 +391,8 @@
       if (allowed) {
         loggedOut=/\/(?:login|signin|sign-in)(?:\/|$)/i.test(location.pathname)
           || Array.from(document.querySelectorAll('input[type="' + String.fromCharCode(112,97,115,115,119,111,114,100) + '"]')).some(el=>visible(root,el));
-        if (loggedOut && !wasLoggedOut) { sessionEpoch++; quota=null;avatar=null;invite=null;stopAvatarRecording(true); lastCode='logged_out'; }
-        if (!loggedOut && wasLoggedOut) { lastAttempt=0; }
+        if (loggedOut && !wasLoggedOut) { sessionEpoch++;requestSerial++;activeController?.abort();activeController=null;busy=false;quota=cardPlan=cardExtra=null;avatar=null;invite=null;stopAvatarRecording(true);lastCode='logged_out'; }
+        if (!loggedOut && wasLoggedOut) { nextAllowed=rateLimitUntil=failures=0; }
         wasLoggedOut=loggedOut;
         if(force && showAvatar)stopAvatarRecording(true);
         if (!loggedOut && ready) void refresh(force);
@@ -384,7 +400,7 @@
           avatarChecked=Date.now();avatar=captureAvatar(root) || avatar;
         }
         if(showAvatar && !loggedOut && ready)recordAvatar();
-        if(!loggedOut && ready && !inviteBusy && Date.now()-inviteChecked>1000){
+        if(!loggedOut && ready && Date.now()-inviteChecked>1000){
           inviteChecked=Date.now();
           try{const found=parseInvite(root);if(found)invite={...found,observed_at:Date.now()};}catch{}
         }
@@ -395,9 +411,12 @@
         animation={frames:avatarRecording.frames,frame_ms:avatarRecording.frame_ms};avatarRecording.sent=true;
       }
       return {url:location.href,ready,quota:allowed ? quota : null,
+        plan:allowed && !loggedOut?cardPlan:null,extra:allowed && !loggedOut?cardExtra:null,
         avatar_png:showAvatar && allowed && !loggedOut?avatar:null,plan_label:allowed && quota?quota.plan_label:null,
         avatar_animation:animation,
         invite:allowed && !loggedOut ? invite : null,
+        invite_status:allowed && !loggedOut?(invite?'passive_observed':'no_proven_reader'):'unavailable',
+        retry_after_ms:Number.isFinite(nextAllowed)?Math.max(0,nextAllowed-Date.now()):null,
         quota_status:!allowed ? 'unsupported' : loggedOut ? 'logged_out' : lastCode,
         action_found:!!action,scripts_scanned:scanned,
         preload_found:preload !== null,settings_loaded:settingsLoaded,

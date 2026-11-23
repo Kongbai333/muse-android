@@ -242,3 +242,47 @@ test('avatar recording stops when a document leaves the trusted Muse origin', ()
   assert.equal(cleared,true);
   assert.equal(context.__museDesktopObserver.snapshot().avatar_animation,null);
 });
+
+test('card: partial subscription fields survive unknown usage without pretending a quota',()=>{
+  const parts=adapter.parseCardResponse(JSON.stringify({subscription:{subscriptionType:'PAID',topupBalance:0,topupTotal:5,usage:{state:'UNKNOWN'}}}));
+  assert.equal(parts.quota,null);assert.equal(parts.plan.label,'订阅版');assert.equal(parts.extra.remaining,0);
+});
+test('card: public invitation model keeps explicit uses_remaining separate and never guesses max_uses zero',()=>{
+  const item={invite_state:'EXHAUSTED',code:'SYNTH6',max_uses:0,use_count:7,uses_remaining:0};
+  assert.equal(adapter.parseInviteModel(item).remaining,0);
+  assert.equal(adapter.parseInviteModel({...item,uses_remaining:null}).remaining,undefined);
+  assert.equal(adapter.parseInviteModel({topupBalance:9}),null);
+});
+test('card: retry policy is finite and honors rate-limit cooldown rather than treating forbidden as logout',()=>{
+  assert.equal(adapter.retryDelay('forbidden',1),null);
+  assert.equal(adapter.retryDelay('request_failed',3),null);
+  assert.ok(adapter.retryDelay('not_found',1)>0);
+  assert.ok(adapter.retryDelay('rate_limited',1,120)>=120000);
+});
+test('card: passive invite refresh never clicks the site reveal control',async()=>{
+  const vm=require('node:vm'),fs=require('node:fs');let clicks=0;
+  const button={innerText:'Invite',getAttribute:()=>'',getBoundingClientRect:()=>({width:40,height:30}),click:()=>{clicks++;}};
+  const context={URL,Headers,AbortController,TextDecoder,Uint8Array,setTimeout:fn=>{queueMicrotask(fn);return 1;},clearTimeout(){},
+    location:new URL('https://muse.ai/'),document:{readyState:'complete',body:{innerText:'SYNTHETIC app',querySelectorAll:()=>[]},querySelectorAll:s=>s==='button,[role="button"],a'?[button]:[]},
+    fetch:async()=>{throw Error('no request allowed');},getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
+  context.window=context;context.top=context;
+  vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
+  await context.__museDesktopObserver.refreshInvite();assert.equal(clicks,0,'cannot turn reveal/claim/generation into background reads');
+});
+test('card: 403 retains the last subscription observation and has a distinct status',async()=>{
+  const vm=require('node:vm'),fs=require('node:fs');let status=200,clock=1800000000000;
+  class Clock extends Date { static now(){return clock;} }
+  const id='d'.repeat(40);
+  const context={URL,Headers,AbortController,TextDecoder,Uint8Array,setTimeout,clearTimeout,Date:Clock,
+    location:new URL('https://muse.ai/'),document:{readyState:'complete',body:{innerText:'SYNTHETIC app',querySelectorAll:()=>[]},querySelectorAll:s=>s==='script[src]'?[{src:'https://muse.ai/_next/static/synthetic.js'}]:[]},
+    fetch:async url=>String(url).endsWith('.js')?new Response(`createServerReference("${id}",x,"fetchSubscriptionAction")`):new Response(status===200?JSON.stringify(sample({state:'AVAILABLE',percentUsed:21})):'{}',{status}),
+    getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
+  context.window=context;context.top=context;
+  vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
+  context.__museDesktopObserver.snapshot(true,false);for(let i=0;i<8;i++)await new Promise(setImmediate);
+  const before=context.__museDesktopObserver.snapshot(false,false).quota;
+  assert.equal(before.used_percent,21);status=403;clock+=1000;context.__museDesktopObserver.snapshot(true,false);
+  for(let i=0;i<8;i++)await new Promise(setImmediate);
+  const after=context.__museDesktopObserver.snapshot(false,false);
+  assert.equal(after.quota.used_percent,21);assert.equal(after.quota.observed_at,before.observed_at);assert.equal(after.quota_status,'forbidden');
+});

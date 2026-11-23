@@ -1,0 +1,17 @@
+# #15 Android 卡片保留旧值与自动刷新
+
+用户目标及约束由项目外 card-refresh-and-updates-20261123/scope-design.md 给定，已授权原 owner 直接实施常规选择，无需重复设计/执行审批；#14 发布 hold 有效。基线065adb5，保留版本0.1.27/code29和冻结迁移v1，不使用真实账号，不做生成/兑换/领取/揭示操作。
+
+## 已查事实与选择
+
+普通失败通常未删缓存，而5分钟/跨周期显示隐藏旧值；成功 quota 又整条覆盖缺失 extra。原生未接 invite，后台模拟点击函数不是只读来源。选择沿用已有可信 profile WebView、observer 和偏好缓存，新增按字段成功时间合并的窄模型；拒绝另建携 Cookie 直连 Muse 的客户端，也不延长 TTL 冒充新成功。
+
+新增纯 Java AccountCardState：usage（known/0/unlimited）、plan、reset、extra 的数值/文案，以及邀请 code/remaining/redeemed/earned 分别保存 value+observed_at；未知、缺失、无效、较早时间不覆盖，明确退出才清缓存。兼容旧 quota JSON。AccountQuota 保留旧值用于显示，fresh/currentWeek 仅作当前性判断；跨周期值标“上次/旧周期”，刻度变淡而不是清空。卡片新增邀请码与页面实际报告的次数，额外额度单独标注，不能混用。
+
+observer 保留 origin/sessionEpoch，401只在当前可信响应归登录失效；403/429/网络/解析分别标记，不清旧值。只对已验证 fetchSubscriptionAction 做有限退避，not_found 可等待新脚本/既有 preload，最多3次且总预算明确；429冷却不立即重试。不模拟邀请码弹窗点击。公开静态模型已确认 uses_remaining 等字段，但尚无只读 reader；被动采集已有 DOM/合法已返回数据可以实现，隐藏时首次无点击获取仍明确待证据，不编造接口。
+
+宿主仍单 active probe，当前账号在登录就绪/前台恢复及节流周期自动刷新；不为所有卡片并发轮询。自动刷新不得切换到另一个账号路由或打断工作室/代理检查/迁移。账号切换、代理修改、删除、停止/销毁取消 probe 并使迟到回调失效。owner选择：仅对当前账号自动采集，后台其他账号在其成为当前账号时触发，避免抢占前台页面/全局路由。
+
+## 验证与边界
+
+针对性纯 Java/Node 检查先 RED 后 GREEN：旧值和原成功时间保留、0/无限量、字段独立、跨周期标签、较旧响应、401/403/429、有限重试、被动邀请不点击。真实 WorkPage/QuotaSync 边界另做少量源契约或 OS doubles；最终与#16一起一次必要构建/合约，不反复全回归。没有设备、真实服务成功率或隐藏邀请只读调用链，不能宣称已实测或完整实现该自动获取子目标。

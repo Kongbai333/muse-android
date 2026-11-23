@@ -24,20 +24,19 @@ record AccountQuota(String plan, Double used, long observed, long resets, String
     }
 
     boolean fresh(long now) { return observed <= now + 30_000 && now - observed < MAX_AGE; }
-    boolean currentWeek(long now) { return fresh(now) && (resets <= 0 || resets > now); }
+    boolean currentWeek(long now) { return fresh(now) && (resets <= 0 || resets > now || observed >= resets); }
 
     String weekly(long now) {
-        if (!currentWeek(now)) return "待刷新";
-        return used == null ? "不限量" : "已用 " + Math.round(used) + "%";
+        String value = used == null ? "不限量" : "已用 " + Math.round(used) + "%";
+        return currentWeek(now) ? value : (resets > observed && resets <= now ? "旧周期 · " : "上次 · ") + value;
     }
 
     String resetLabel(long now) {
-        if (resets <= 0 || !currentWeek(now)) return "";
-        return new SimpleDateFormat("M月d日重置", Locale.SIMPLIFIED_CHINESE).format(new Date(resets));
+        if (resets <= 0) return "";
+        return (resets <= now ? "上次 " : "") + new SimpleDateFormat("M月d日重置", Locale.SIMPLIFIED_CHINESE).format(new Date(resets));
     }
 
     String invitation(long now) {
-        if (!fresh(now)) return "待刷新";
         return extra.isEmpty() ? "待同步" : extra;
     }
 

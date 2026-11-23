@@ -79,6 +79,7 @@ jobs:
       - name: Browser adapter contracts
         run: |
           node --test checks/check-observer.cjs
+          node --test checks/check-card-refresh-integration.cjs
           node --test checks/check-account-transfer-integration.cjs
           node checks/check-account-transfer-store.cjs
           node checks/check-account-transfer-json.cjs

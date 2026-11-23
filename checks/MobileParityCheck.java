@@ -12,7 +12,7 @@ public final class MobileParityCheck {
             0., 200., null, now);
         require(limited != null && limited.weekly(now).equals("已用 0%"), "实际零额度不能显示成未知");
         require(limited.invitation(now).equals("剩余 0 / 200"), "邀请额度必须单独使用站点的数值");
-        require(limited.weekly(now + 60_001).equals("待刷新"), "周额度重置后不应显示旧值");
+        require(limited.weekly(now + 60_001).equals("旧周期 · 已用 0%"), "周额度重置后保留旧值但必须明确旧周期");
         require(limited.invitation(now + 60_001).equals("剩余 0 / 200"), "周重置不能清空邀请额度");
         require(AccountQuota.read("Plus", "known", 101., now, 0, null, null, null, now) == null,
             "无效用量不能缓存");
