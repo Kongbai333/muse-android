@@ -86,7 +86,7 @@
     const match=/\.A\((\d+)\)\.then\(\s*\(\s*\{\s*preloadHatchSettingsData\b/.exec(source);
     return match ? Number(match[1]) : null;
   }
-  function parseInviteModel(node){
+  function parseInviteModel(node,allowEmpty=false){
     if(!node || typeof node!=='object' || Array.isArray(node) || !('code' in node) || !('max_uses' in node) || !('use_count' in node))return null;
     const integer=v=>v===null || v===undefined || Number.isSafeInteger(v) && v>=0;
     if(![node.max_uses,node.use_count,node.uses_remaining].every(integer))return null;
@@ -94,7 +94,7 @@
     const out={};
     if(node.code!==null && node.code!==undefined){if(typeof node.code!=='string' || !/^[A-Z0-9]{6,16}$/.test(node.code.trim().toUpperCase()))return null;out.code=node.code.trim().toUpperCase();}
     if(node.uses_remaining!==null && node.uses_remaining!==undefined)out.remaining=node.uses_remaining;
-    return Object.keys(out).length?out:null;
+    return Object.keys(out).length || allowEmpty?out:null;
   }
   function parseCardResponse(text){
     const result={quota:parseResponse(text),plan:null,extra:null,invite:null};
@@ -227,12 +227,68 @@
   let sessionEpoch=0, wasLoggedOut=false, wasChallenge=false, avatar=null, avatarChecked=0;
   let avatarRecording=null;
   let invite=null, inviteChecked=0;
-  // Passive only. A visible dialog or a proven payload is not a hidden read API.
-  async function refreshInvite(){
-    if(!trusted(location.href) || wasLoggedOut || wasChallenge || !contentReady(root))return 'skip';
-    const open=parseInvite(root);
-    if(open){invite={...open,observed_at:Date.now()};return 'ok';}
-    return 'not_available';
+  let inviteStatus='waiting',inviteBusy=false,inviteFailures=0,inviteNext=0,inviteRateUntil=0,inviteManualAfter=0;
+  let inviteSerial=0,inviteController=null,inviteRoute=location.href;
+  function mergeInvite(found,at=Date.now()){
+    for(const key of ['code','remaining','redeemed','earned'])if(found?.[key]!==null && found?.[key]!==undefined){
+      if(!invite)invite={};invite[key]=found[key];invite[key+'_observed_at']=at;invite.observed_at=at;
+    }
+  }
+  function invalidateInvite(){
+    inviteSerial++;inviteController?.abort();inviteController=null;inviteBusy=false;
+    if(inviteStatus==='syncing')inviteStatus='waiting';
+  }
+  function syncInviteRoute(){
+    if(inviteRoute!==location.href){inviteRoute=location.href;invalidateInvite();}
+  }
+  function challengePresent(){
+    return Array.from(document.querySelectorAll('input[type="' + String.fromCharCode(112,97,115,115,119,111,114,100) + '"]')).some(el=>visible(root,el));
+  }
+  // Proven page reader only. The generation POST at the same path is never used.
+  async function refreshInvite(manual=false){
+    syncInviteRoute();
+    if(!trusted(location.href) || wasLoggedOut || wasChallenge || lastCode==='logged_out'
+      || /\/(?:login|signin|sign-in)(?:\/|$)/i.test(location.pathname) || challengePresent() || !contentReady(root))return 'skip';
+    if(inviteBusy || Date.now()<inviteRateUntil || manual && Date.now()<inviteManualAfter)return inviteStatus;
+    if(manual){inviteFailures=0;inviteNext=0;}
+    if(Date.now()<inviteNext)return inviteStatus;
+    const epoch=sessionEpoch,serial=++inviteSerial,route=location.href;
+    const controller=new AbortController();inviteController=controller;inviteBusy=true;inviteStatus='syncing';inviteManualAfter=Date.now()+30000;
+    const current=()=>epoch===sessionEpoch && serial===inviteSerial && route===location.href && !controller.signal.aborted
+      && !wasLoggedOut && !wasChallenge && lastCode!=='logged_out' && trusted(location.href) && !challengePresent();
+    let code='request_failed',retryAfter=0,onAbort;
+    const aborted=new Promise((_,reject)=>{onAbort=()=>reject(new Error('aborted'));controller.signal.addEventListener('abort',onAbort,{once:true});});
+    const timer=setTimeout(()=>controller.abort(),10000);
+    try{
+      await Promise.race([aborted,(async()=>{
+        const url=new URL('/api/hatch/invite',location.origin).href;
+        const response=await nativeFetch(url,{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json'}});
+        if(!current())return;
+        if(response.status===401){code='logged_out';return;}
+        if(response.status===403){code='forbidden';return;}
+        if(response.status===429){code='rate_limited';const raw=response.headers.get('retry-after');retryAfter=/^\d+$/.test(raw||'')?Number(raw)*1000:Math.max(0,Date.parse(raw)-Date.now());return;}
+        if(!response.ok || response.redirected || response.url && response.url!==url)return;
+        if(!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')||'')){code='unrecognized';return;}
+        const text=await boundedText(response);if(!current())return;
+        let parsed;try{parsed=parseInviteModel(JSON.parse(text),true);}catch{code='unrecognized';return;}
+        if(parsed===null){code='unrecognized';return;}
+        mergeInvite(parsed);code='ok';
+      })()]);
+    }catch{code='request_failed';}
+    finally{
+      clearTimeout(timer);controller.signal.removeEventListener('abort',onAbort);
+      if(epoch===sessionEpoch && serial===inviteSerial && route===location.href && !wasLoggedOut && !wasChallenge){
+        inviteBusy=false;inviteController=null;
+        inviteManualAfter=Math.max(inviteManualAfter,Date.now()+30000);
+        let delay;
+        if(code==='ok'){inviteFailures=0;delay=300000;}
+        else if(code==='rate_limited'){delay=Math.min(3600000,Math.max(300000,Number.isFinite(retryAfter)?retryAfter:0));inviteRateUntil=Math.max(inviteRateUntil,Date.now()+delay);}
+        else if(code==='logged_out' || code==='forbidden')delay=Infinity;
+        else {inviteFailures=Math.min(6,inviteFailures+1);delay=[2000,10000,90000,900000,1800000,3600000][inviteFailures-1];if(inviteFailures<3)code='retry_wait';}
+        inviteStatus=code;inviteNext=Date.now()+delay;
+      }
+    }
+    return inviteStatus;
   }
   function stopAvatarRecording(discard=false) {
     if(avatarRecording?.timer != null)root.clearInterval(avatarRecording.timer);
@@ -261,7 +317,7 @@
     if(found.quota)quota={...found.quota,observed_at:at};
     if(found.plan)cardPlan={...found.plan,observed_at:at};
     if(found.extra)cardExtra={...found.extra,observed_at:at};
-    if(found.invite)invite={...found.invite,observed_at:at};
+    if(found.invite)mergeInvite(found.invite,at);
     if(found.quota)lastCode='ok';else if(found.plan || found.extra || found.invite)lastCode='partial';
     return !!found.quota;
   };
@@ -349,7 +405,7 @@
         body:'[{"includeAgreement":true}]',
       });
       if (epoch !== sessionEpoch || wasLoggedOut) return;
-      if (response.status === 401) { quota=null;cardPlan=cardExtra=invite=null;code='logged_out';return; }
+      if (response.status === 401) { quota=null;cardPlan=cardExtra=invite=null;invalidateInvite();inviteStatus='logged_out';inviteNext=Infinity;code='logged_out';return; }
       if (response.status === 403) { code='forbidden';return; }
       if (response.status === 429) { code='rate_limited';const raw=response.headers.get('retry-after');retryAfter=/^\d+$/.test(raw||'')?Number(raw):Math.max(0,(Date.parse(raw)-Date.now())/1000);return; }
       if (!response.ok) return;
@@ -385,30 +441,32 @@
   }
   root.__museDesktopObserver={
     refreshInvite,
-    snapshot(force=false, showAvatar=true) {
+    snapshot(force=false, showAvatar=true, readInvite=true, manualInvite=false) {
+      syncInviteRoute();
       const ready=contentReady(root);
       const allowed=trusted(location.href);
       let loggedOut=false,authenticationPending=false;
       if (allowed) {
         loggedOut=/\/(?:login|signin|sign-in)(?:\/|$)/i.test(location.pathname);
-        authenticationPending=!loggedOut && Array.from(document.querySelectorAll('input[type="' + String.fromCharCode(112,97,115,115,119,111,114,100) + '"]')).some(el=>visible(root,el));
-        if(authenticationPending && !wasChallenge){sessionEpoch++;requestSerial++;activeController?.abort();activeController=null;busy=false;nextAllowed=Infinity;stopAvatarRecording(true);}
-        if (loggedOut && !wasLoggedOut) { sessionEpoch++;requestSerial++;activeController?.abort();activeController=null;busy=false;quota=cardPlan=cardExtra=null;avatar=null;invite=null;stopAvatarRecording(true);lastCode='logged_out'; }
-        if (!loggedOut && !authenticationPending && (wasLoggedOut || wasChallenge)) { nextAllowed=rateLimitUntil=failures=0; }
+        authenticationPending=!loggedOut && challengePresent();
+        if(authenticationPending && !wasChallenge){sessionEpoch++;requestSerial++;activeController?.abort();activeController=null;busy=false;nextAllowed=Infinity;invalidateInvite();stopAvatarRecording(true);}
+        if (loggedOut && !wasLoggedOut) { sessionEpoch++;requestSerial++;activeController?.abort();activeController=null;busy=false;quota=cardPlan=cardExtra=null;avatar=null;invite=null;invalidateInvite();stopAvatarRecording(true);lastCode='logged_out'; }
+        if (!loggedOut && !authenticationPending && (wasLoggedOut || wasChallenge)) { nextAllowed=rateLimitUntil=failures=0;inviteFailures=inviteNext=0;inviteStatus='waiting'; }
         wasLoggedOut=loggedOut;
         wasChallenge=authenticationPending;
         if(force && showAvatar)stopAvatarRecording(true);
         if (!loggedOut && !authenticationPending && ready) void refresh(force);
+        if (readInvite && !loggedOut && !authenticationPending && ready) void refreshInvite(force && manualInvite);
         if(showAvatar && !loggedOut && !authenticationPending && ready && (!avatar || force || Date.now()-avatarChecked>30000)){
           avatarChecked=Date.now();avatar=captureAvatar(root) || avatar;
         }
         if(showAvatar && !loggedOut && !authenticationPending && ready)recordAvatar();
         if(!loggedOut && !authenticationPending && ready && Date.now()-inviteChecked>1000){
           inviteChecked=Date.now();
-          try{const found=parseInvite(root);if(found)invite={...found,observed_at:Date.now()};}catch{}
+          try{mergeInvite(parseInvite(root));}catch{}
         }
       }
-      if(!allowed)stopAvatarRecording(true);
+      if(!allowed){invalidateInvite();stopAvatarRecording(true);}
       let animation=null;
       if(showAvatar && allowed && !loggedOut && avatarRecording?.done && !avatarRecording.sent){
         animation={frames:avatarRecording.frames,frame_ms:avatarRecording.frame_ms};avatarRecording.sent=true;
@@ -418,7 +476,8 @@
         avatar_png:showAvatar && allowed && !loggedOut?avatar:null,plan_label:allowed && quota?quota.plan_label:null,
         avatar_animation:animation,
         invite:allowed && !loggedOut ? invite : null,
-        invite_status:allowed && !loggedOut?(invite?'passive_observed':'no_proven_reader'):'unavailable',
+        invite_status:allowed && !loggedOut?(authenticationPending?'authentication_pending':inviteStatus):'unavailable',
+        invite_retry_after_ms:Number.isFinite(inviteNext)?Math.max(0,Math.max(inviteNext,inviteRateUntil)-Date.now()):null,
         retry_after_ms:Number.isFinite(nextAllowed)?Math.max(0,nextAllowed-Date.now()):null,
         quota_status:!allowed ? 'unsupported' : loggedOut ? 'logged_out' : authenticationPending ? 'authentication_pending' : lastCode,
         action_found:!!action,scripts_scanned:scanned,

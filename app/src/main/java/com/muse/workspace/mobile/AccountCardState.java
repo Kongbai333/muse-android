@@ -46,10 +46,10 @@ final class AccountCardState {
         Map<String,Object> invite=object(reply.get("invite"));
         if(invite!=null){
             long at=time(invite,now);
-            put(next,"invite_code",invite.get("code"),at,now);
-            put(next,"invite_remaining",invite.get("remaining"),at,now);
-            put(next,"invite_redeemed",invite.get("redeemed"),at,now);
-            put(next,"invite_earned",invite.get("earned"),at,now);
+            put(next,"invite_code",invite.get("code"),fieldTime(invite,"code",at),now);
+            put(next,"invite_remaining",invite.get("remaining"),fieldTime(invite,"remaining",at),now);
+            put(next,"invite_redeemed",invite.get("redeemed"),fieldTime(invite,"redeemed",at),now);
+            put(next,"invite_earned",invite.get("earned"),fieldTime(invite,"earned",at),now);
         }
         return new AccountCardState(next);
     }
@@ -113,6 +113,7 @@ final class AccountCardState {
     private static String text(Object value,int max){if(!(value instanceof String s))return null;String clean=s.trim();return clean.isEmpty()||clean.length()>max||clean.chars().anyMatch(Character::isISOControl)?null:clean;}
     private static Double number(Object value){if(!(value instanceof Number n))return null;double d=n.doubleValue();return Double.isFinite(d)&&d>=0?d:null;}
     private static Long integer(Object value){Double n=number(value);return n!=null&&n<=9007199254740991L&&n==Math.floor(n)?n.longValue():null;}
+    private static long fieldTime(Map<String,Object> data,String field,long fallback){String key=field+"_observed_at";if(!data.containsKey(key))return fallback;Long at=integer(data.get(key));return at==null?0:at;}
     private static long time(Map<String,Object> data,long now){Long at=integer(data.get("observed_at"));return at==null||at<=0||at>now+30000?0:at;}
     @SuppressWarnings("unchecked") private static Map<String,Object> object(Object value){return value instanceof Map<?,?>?(Map<String,Object>)value:null;}
 }

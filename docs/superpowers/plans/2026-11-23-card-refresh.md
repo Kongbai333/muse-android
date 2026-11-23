@@ -60,3 +60,19 @@ Files: QuotaRefreshPolicy.java, checks/QuotaRefreshPolicyCheck.java; spec above.
 - [x] Finish only bounded cached module/reference-repo invitation tracing and record the remaining gap in external findings/ready. Reference fixed commit f7f5be5 has a UI-driven Settings quota reader and local dispatch use_count, not a verified invitation reader. No push/main/tag/CI/Release;#14hold remains. This local theme commit is the review deliverable.
 
 Ruling: this review explicitly limits verification to affected policy and incremental build, so the previous19-program full run is not repeated. The existing60second foreground pulse consumes a recovery opportunity only when host/page/route/profile gates and the single-probe guard allow work.
+
+### Authenticated-contract follow-up: Automatic read-only invitation GET
+
+Base eb468dbe; spec's new reader section is binding, already authorized for inline execution. Preserve version/signing/updater/transfer andR-A1. No helpers or real account access; no remote writes.
+
+Files: muse-observer.js (fixed GET, independent budget and nullable parser), QuotaSync.java (independent native policy, snapshot flags, terminal receipt and bounded close), QuotaCard.java (honest unknown labels), checks/check-observer.cjs and check-card-refresh-integration.cjs (real observer behavior and extracted actual native boundaries).
+
+Interfaces: `refreshInvite(manual=false)`, `snapshot(force=false,showAvatar=true,readInvite=true,manualInvite=false)`; snapshot adds `invite_retry_after_ms`, while invite_status has waiting/syncing/retry_wait/ok/forbidden/logged_out/rate_limited/request_failed/unrecognized. Native `receiveInvite(Probe,JSONObject)` records one terminal outcome; no values/credentials are logged.
+
+- [x] Add behavioral RED for hidden-panel automatic GET, exact method/options, null/0/partial merge, independent success/failure budgets,401/403/429 expiry, transport/size/timeout and oldroute/epoch. Use only fake fetch/clock, not public/auth requests.
+- [x] Implement the fixed GET and invalidation with separate serial/controller/clock; preserve quota values/status/time and existing manual DOM path. Reuse model parser with an explicit valid-empty mode. Manual retries wait at least30s; hard429 is never bypassed.
+- [x] Wire independent native invitation budget across WorkPages, wait boundedly for its result without failing successful quota, retain cancellation/route gates;14 checks execute actual native method bodies with OS boundaries replaced. Field model now honors independent JS field timestamps (21 checks).
+- [x] Run affected observer/native checks (47 Node cases) plus focused field model/R-A1 checks only (21/46 also consume actual Gradle classes); one incremental assembleDebug26s,6 tasks executed/27up-to-date. Packaging/debug signature/metadata/checksum and packaged observer hash passed. Preserve old logs.
+- [x] Update external ready/findings/release draft with precise source versus PC real-session evidence; this local theme commit is the deliverable. No push/main/tag/CI/Release.
+
+Ruling: existing quota/avatar-only fixtures now explicitly pass readInvite=false, so their fake fetch counters still test the original boundary;15 dedicated new observer cases exercise the default automatic invitation path. NativeJava changes are real (budget receipt and per-field time merge); this is not a JS-only repackage. No fresh full19-program/lint/updater regression was claimed.

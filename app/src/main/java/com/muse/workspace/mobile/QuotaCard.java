@@ -42,8 +42,8 @@ final class QuotaCard {
         invite.setMaxWidth(ui.dp(140));
         bottom.addView(invite, new LinearLayout.LayoutParams(-2, -2));
         ui.block(view, bottom, 7);
-        code = ui.text("邀请码 · 待页面提供", 12, TEXT2, false);
-        uses = ui.text("次数 · 待页面提供", 12, TEXT2, false);
+        code = ui.text("邀请码 · 暂无已知值", 12, TEXT2, false);
+        uses = ui.text("次数 · 暂无已知值", 12, TEXT2, false);
         note = ui.text("待同步", 11, MUTED, false);
         ui.block(view, code, 7);
         ui.block(view, uses, 3);
@@ -68,8 +68,8 @@ final class QuotaCard {
         long extraAt = Math.max(card.observed("extra_remaining"), card.observed("extra_display"));
         long usageAt = data == null ? 0 : data.observed();
         invite.setText(card.extraText().isEmpty() ? "待同步" : (old(extraAt, now) || extraAt < usageAt ? "上次 " : "") + card.extraText());
-        code.setText(card.inviteCode().isEmpty() ? "邀请码 · 待页面提供" : (old(card.observed("invite_code"), now) || card.observed("invite_code") < usageAt ? "上次邀请码 · " : "邀请码 · ") + card.inviteCode());
-        String count = card.inviteRemaining() == null ? "次数 · 待页面提供" : (old(card.observed("invite_remaining"), now) || card.observed("invite_remaining") < usageAt ? "上次 " : "") + "还可使用 " + card.inviteRemaining() + " 次";
+        code.setText(card.inviteCode().isEmpty() ? "邀请码 · 暂无已知值" : (old(card.observed("invite_code"), now) || card.observed("invite_code") < usageAt ? "上次邀请码 · " : "邀请码 · ") + card.inviteCode());
+        String count = card.inviteRemaining() == null ? "次数 · 暂无已知值" : (old(card.observed("invite_remaining"), now) || card.observed("invite_remaining") < usageAt ? "上次 " : "") + "还可使用 " + card.inviteRemaining() + " 次";
         if (card.inviteRedeemed() != null) count += " · " + card.inviteRedeemed() + " 位好友已兑现";
         if (!card.inviteEarned().isEmpty()) count += " · 已赚取 " + card.inviteEarned();
         uses.setText(count);

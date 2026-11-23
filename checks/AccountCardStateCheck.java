@@ -26,6 +26,13 @@ public final class AccountCardStateCheck {
         require(invite.quota(NOW+600002).used()==0.&&invite.observed("usage")==NOW+600001,"invitation success cannot refresh quota time");
         AccountCardState partial=invite.merge(map("invite",map("remaining",3L,"observed_at",NOW+600003)),NOW+600003);
         require(partial.inviteCode().equals("SYNTH6")&&partial.observed("invite_code")==NOW+600002&&partial.inviteRemaining()==3L,"partial invite preserves code/time");
+        AccountCardState jsPartial=partial.merge(map("invite",map("code","SYNTH6","code_observed_at",NOW+600002,
+            "remaining",0L,"remaining_observed_at",NOW+600004,"observed_at",NOW+600004)),NOW+600004);
+        require(jsPartial.inviteRemaining()==0L&&jsPartial.observed("invite_remaining")==NOW+600004,"reader zero has its own observation time");
+        require(jsPartial.observed("invite_code")==NOW+600002&&jsPartial.observed("usage")==NOW+600001,"retained JS code and quota do not acquire the new remaining time");
+        AccountCardState invalidTime=jsPartial.merge(map("invite",map("code","NEW777","code_observed_at",NOW+9999999,
+            "remaining",1L,"remaining_observed_at",null,"observed_at",NOW+600005)),NOW+600005);
+        require(invalidTime.inviteCode().equals("SYNTH6")&&invalidTime.inviteRemaining()==0L,"invalid explicit per-field times cannot fall back to a newer group time");
         AccountCardState unlimited=partial.merge(map("quota",map("state","unlimited","observed_at",NOW+600004)),NOW+600004);
         require(unlimited.quota(NOW+600004).used()==null&&unlimited.quota(NOW+600004).weekly(NOW+600004).contains("不限量"),"unlimited is valid even with stale reset metadata");
         AccountCardState old=unlimited.merge(map("quota",map("state","known","used_percent",99.,"observed_at",NOW)),NOW+600004);

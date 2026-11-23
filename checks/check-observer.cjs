@@ -4,6 +4,8 @@ const adapter = require('../app/src/main/assets/muse-observer.js');
 const sample = (usage) => ({ subscriptionType: 'PAID', usage });
 // Browser fixtures use a real EventTarget, matching the window interface that
 // the production observer uses for pointer, keyboard and wheel idle tracking.
+// Earlier quota/avatar fixtures explicitly disable the independent invitation
+// reader; its default automatic path is exercised in the dedicated tests below.
 function withBrowserEvents(context) {
   const events = new EventTarget();
   for (const method of ['addEventListener', 'removeEventListener', 'dispatchEvent']) {
@@ -49,8 +51,8 @@ test('avatar is retried promptly when account media loads after the ready docume
     fetch:async()=>{throw Error('unexpected request');},getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
   context.window=context;context.top=context;
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
-  assert.equal(context.__museDesktopObserver.snapshot().avatar_png,null);
-  loaded=true;assert.equal(context.__museDesktopObserver.snapshot().avatar_png,'data:image/png;base64,AAAA');
+  assert.equal(context.__museDesktopObserver.snapshot(false,true,false).avatar_png,null);
+  loaded=true;assert.equal(context.__museDesktopObserver.snapshot(false,true,false).avatar_png,'data:image/png;base64,AAAA');
 });
 test('extra invitation and topup pool is separate from the subscription percentage', () => {
   const value={...sample({state:'AVAILABLE',percentUsed:28}),topupBalance:600,topupTotal:1000,topupRowValueLabel:'剩余 600 积分'};
@@ -133,7 +135,7 @@ test('the browser observer returns a serializable snapshot while lookup is pendi
     getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
   context.window=context;context.top=context;
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
-  const snapshot=JSON.parse(JSON.stringify(context.__museDesktopObserver.snapshot()));
+  const snapshot=JSON.parse(JSON.stringify(context.__museDesktopObserver.snapshot(false,true,false)));
   assert.equal(snapshot.ready,true);
   assert.equal(snapshot.quota,null);
   assert.equal(snapshot.url,'https://muse.ai/');
@@ -155,16 +157,16 @@ test('a subscription reply from before logout cannot refill a new login session'
     },getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
   context.window=context;context.top=context;
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
-  context.__museDesktopObserver.snapshot(true);
+  context.__museDesktopObserver.snapshot(true,true,false);
   await requestStarted;
   context.location=new URL('https://muse.ai/login');
-  context.__museDesktopObserver.snapshot();
+  context.__museDesktopObserver.snapshot(false,true,false);
   context.location=new URL('https://muse.ai/');
-  context.__museDesktopObserver.snapshot();
+  context.__museDesktopObserver.snapshot(false,true,false);
   release(new Response(JSON.stringify(sample({state:'AVAILABLE',percentUsed:28}))));
   await new Promise(resolve=>setImmediate(resolve));
   await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(context.__museDesktopObserver.snapshot().quota,null);
+  assert.equal(context.__museDesktopObserver.snapshot(false,true,false).quota,null);
 });
 test('lazy settings loading discovers and calls only the named subscription reader', async () => {
   const vm=require('node:vm'),fs=require('node:fs');
@@ -187,9 +189,9 @@ test('lazy settings loading discovers and calls only the named subscription read
     else registered({A:async moduleId=>{assert.equal(moduleId,12345);loaderCalls++;scripts.push({src:'https://muse.ai/_next/static/settings.js'});}});
   }};
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
-  context.__museDesktopObserver.snapshot(true);
+  context.__museDesktopObserver.snapshot(true,true,false);
   for(let i=0;i<8;i++) await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(context.__museDesktopObserver.snapshot().quota.used_percent,46);
+  assert.equal(context.__museDesktopObserver.snapshot(false,true,false).quota.used_percent,46);
   assert.equal(loaderCalls,1);assert.equal(lookups,1);
 });
 
@@ -207,24 +209,24 @@ test('avatar clip records changing frames with a bounded local timer and clears 
     getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
   context.window=context;context.top=context;
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
-  context.__museDesktopObserver.snapshot();
+  context.__museDesktopObserver.snapshot(false,true,false);
   assert.equal(typeof tick,'function');
   for(let i=0;i<60;i++)tick();
-  const clip=context.__museDesktopObserver.snapshot().avatar_animation;
+  const clip=context.__museDesktopObserver.snapshot(false,true,false).avatar_animation;
   assert.equal(clip.frames.length,48);
   assert.equal(clip.frame_ms,125);
   assert.notEqual(clip.frames[0],clip.frames[47]);
   assert.equal(cleared,true);
   assert.equal(requests,0);
-  assert.equal(context.__museDesktopObserver.snapshot().avatar_animation,null,'finished clip is sent once');
-  context.__museDesktopObserver.snapshot(true);
+  assert.equal(context.__museDesktopObserver.snapshot(false,true,false).avatar_animation,null,'finished clip is sent once');
+  context.__museDesktopObserver.snapshot(true,true,false);
   for(let i=0;i<48;i++)tick();
-  const updated=context.__museDesktopObserver.snapshot().avatar_animation;
+  const updated=context.__museDesktopObserver.snapshot(false,true,false).avatar_animation;
   assert.ok(updated,'manual refresh records a fresh avatar instead of keeping the first clip forever');
   assert.notEqual(updated.frames[0],clip.frames[0]);
   context.location=new URL('https://muse.ai/login');
-  assert.equal(context.__museDesktopObserver.snapshot().avatar_png,null);
-  assert.equal(context.__museDesktopObserver.snapshot().avatar_animation,null);
+  assert.equal(context.__museDesktopObserver.snapshot(false,true,false).avatar_png,null);
+  assert.equal(context.__museDesktopObserver.snapshot(false,true,false).avatar_animation,null);
 });
 
 test('avatar recording stops when a document leaves the trusted Muse origin', () => {
@@ -237,10 +239,10 @@ test('avatar recording stops when a document leaves the trusted Muse origin', ()
     fetch:async()=>{throw new Error('no requests');},getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
   context.window=context;context.top=context;
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
-  context.__museDesktopObserver.snapshot();
+  context.__museDesktopObserver.snapshot(false,true,false);
   context.location=new URL('https://example.test/');tick();
   assert.equal(cleared,true);
-  assert.equal(context.__museDesktopObserver.snapshot().avatar_animation,null);
+  assert.equal(context.__museDesktopObserver.snapshot(false,true,false).avatar_animation,null);
 });
 
 test('card: partial subscription fields survive unknown usage without pretending a quota',()=>{
@@ -279,11 +281,11 @@ test('card: 403 retains the last subscription observation and has a distinct sta
     getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
   context.window=context;context.top=context;
   vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
-  context.__museDesktopObserver.snapshot(true,false);for(let i=0;i<8;i++)await new Promise(setImmediate);
-  const before=context.__museDesktopObserver.snapshot(false,false).quota;
-  assert.equal(before.used_percent,21);status=403;clock+=1000;context.__museDesktopObserver.snapshot(true,false);
+  context.__museDesktopObserver.snapshot(true,false,false);for(let i=0;i<8;i++)await new Promise(setImmediate);
+  const before=context.__museDesktopObserver.snapshot(false,false,false).quota;
+  assert.equal(before.used_percent,21);status=403;clock+=1000;context.__museDesktopObserver.snapshot(true,false,false);
   for(let i=0;i<8;i++)await new Promise(setImmediate);
-  const after=context.__museDesktopObserver.snapshot(false,false);
+  const after=context.__museDesktopObserver.snapshot(false,false,false);
   assert.equal(after.quota.used_percent,21);assert.equal(after.quota.observed_at,before.observed_at);assert.equal(after.quota_status,'forbidden');
 });
 test('card: a password challenge outside a login route keeps cached fields without calling it verified logout',async()=>{
@@ -294,10 +296,10 @@ test('card: a password challenge outside a login route keeps cached fields witho
   fetch:async url=>{if(String(url).endsWith('.js'))return new Response(`createServerReference("${id}",x,"fetchSubscriptionAction")`);requests++;return new Response(JSON.stringify(sample({state:'AVAILABLE',percentUsed:12})));},
   getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};context.window=context;context.top=context;
  vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
- context.__museDesktopObserver.snapshot(true,false);for(let i=0;i<8;i++)await new Promise(setImmediate);
- challenge=true;const pending=context.__museDesktopObserver.snapshot(true,false);
+ context.__museDesktopObserver.snapshot(true,false,false);for(let i=0;i<8;i++)await new Promise(setImmediate);
+ challenge=true;const pending=context.__museDesktopObserver.snapshot(true,false,false);
  assert.equal(pending.quota.used_percent,12);assert.equal(pending.quota_status,'authentication_pending');assert.equal(requests,1);
- context.location=new URL('https://muse.ai/login');const logged=context.__museDesktopObserver.snapshot(false,false);assert.equal(logged.quota,null);assert.equal(logged.quota_status,'logged_out');
+ context.location=new URL('https://muse.ai/login');const logged=context.__museDesktopObserver.snapshot(false,false,false);assert.equal(logged.quota,null);assert.equal(logged.quota_status,'logged_out');
 });
 test('card: passive invitation parsing never reads password or hidden input values',()=>{
  const body={},input={type:'password',get value(){throw Error('SYNTHETIC sensitive input must not be read');}};
@@ -314,7 +316,135 @@ test('card: a failed passive HTTP response cannot refresh values or successful o
   fetch:async()=>new Response(JSON.stringify(sample({state:'AVAILABLE',percentUsed:status===200?17:88})),{status}),getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
  context.window=context;context.top=context;vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
  await context.fetch('https://muse.ai/api/subscription');for(let i=0;i<8;i++)await new Promise(setImmediate);
- const before=context.__museDesktopObserver.snapshot(false,false).quota;assert.equal(before.used_percent,17);
+ const before=context.__museDesktopObserver.snapshot(false,false,false).quota;assert.equal(before.used_percent,17);
  status=503;clock+=1000;await context.fetch('https://muse.ai/api/subscription');for(let i=0;i<8;i++)await new Promise(setImmediate);
- const after=context.__museDesktopObserver.snapshot(false,false).quota;assert.equal(after.used_percent,17);assert.equal(after.observed_at,before.observed_at);
+ const after=context.__museDesktopObserver.snapshot(false,false,false).quota;assert.equal(after.used_percent,17);assert.equal(after.observed_at,before.observed_at);
+});
+
+// Real observer in a fresh synthetic page. No request leaves this fake fetch.
+const invitePayload=(fields={})=>({invite_state:'eligible',code:'SYNTH6',max_uses:5,use_count:1,uses_remaining:4,...fields});
+const inviteResponse=(fields={},status=200,headers={})=>new Response(JSON.stringify(fields),{status,headers:{'Content-Type':'application/json',...headers}});
+const settleInvite=async()=>{for(let i=0;i<8;i++)await new Promise(setImmediate);};
+function invitePage(reply=()=>inviteResponse(invitePayload()),fakeTimers=false){
+ const vm=require('node:vm'),fs=require('node:fs');let now=1800000000000,challenge=false,clicks=0;
+ const calls=[],timers=new Map();let timerId=0;class Clock extends Date{static now(){return now;}}
+ const input={getBoundingClientRect:()=>({width:30,height:30})};
+ const context={URL,Headers,AbortController,TextDecoder,Uint8Array,Date:Clock,
+  setTimeout:fakeTimers?(fn,delay)=>{const id=++timerId;timers.set(id,{fn,delay});return id;}:setTimeout,
+  clearTimeout:fakeTimers?id=>timers.delete(id):clearTimeout,
+  location:new URL('https://muse.ai/'),
+  document:{readyState:'complete',body:{innerText:'SYNTHETIC signed-in app',querySelectorAll:()=>[]},
+   querySelectorAll:s=>s.startsWith('input[type=')&&challenge?[input]:s==='button,[role="button"],a'?[{click(){clicks++;throw Error('no click');}}]:[]},
+  fetch:async(url,options={})=>{
+   const target=new URL(typeof url==='string'?url:url.url,context.location.href);
+   if(target.pathname==='/api/subscription')return inviteResponse(sample({state:'AVAILABLE',percentUsed:17}));
+   assert.equal(target.pathname,'/api/hatch/invite','only the fixed read endpoint is allowed');
+   calls.push({url:target.href,options});return reply(calls.length,options);
+  },getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
+ context.window=context;context.top=context;
+ vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
+ return {context,calls,timers,observer:context.__museDesktopObserver,clock:()=>now,advance:ms=>{now+=ms;},
+  challenge:value=>{challenge=value;},clicks:()=>clicks};
+}
+test('invite reader: ready snapshot automatically GETs without an open panel, POST or click',async()=>{
+ const p=invitePage();p.observer.snapshot(false,false);await settleInvite();
+ assert.equal(p.calls.length,1,'first ready snapshot must automatically read the hidden model');
+ const {url,options}=p.calls[0];assert.equal(url,'https://muse.ai/api/hatch/invite');
+ assert.equal(options.method,'GET');assert.equal(options.credentials,'same-origin');assert.equal(options.cache,'no-store');assert.equal(options.redirect,'error');
+ assert.equal('body' in options,false);assert.equal(new Headers(options.headers).get('Cookie'),null);
+ const result=p.observer.snapshot(false,false);assert.equal(result.invite.code,'SYNTH6');assert.equal(result.invite.remaining,4);assert.equal(result.invite_status,'ok');assert.equal(p.clicks(),0);
+ assert.equal(result.invite.redeemed,undefined);assert.equal(result.invite.earned,undefined);
+});
+test('invite reader: single flight and success interval are independent of forced quota refresh',async()=>{
+ let release;const p=invitePage(n=>n===1?new Promise(r=>release=r):inviteResponse(invitePayload()));
+ p.observer.snapshot(false,false);for(let i=0;i<10;i++)p.observer.snapshot(true,false);
+ await settleInvite();assert.equal(p.calls.length,1);release(inviteResponse(invitePayload()));await settleInvite();
+ p.advance(299999);p.observer.snapshot(true,false);await settleInvite();assert.equal(p.calls.length,1);
+ p.advance(1);p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,2);
+});
+test('invite reader: zero and partial values retain independent old field times, never infer redeemed',async()=>{
+ const p=invitePage(n=>inviteResponse(invitePayload(n===1?{}:{code:null,uses_remaining:0,use_count:5})));
+ p.observer.snapshot(false,false);await settleInvite();const first=p.observer.snapshot(false,false).invite;
+ p.advance(300000);p.observer.snapshot(false,false);await settleInvite();const second=p.observer.snapshot(false,false).invite;
+ assert.equal(second.code,'SYNTH6');assert.equal(second.code_observed_at,first.code_observed_at);
+ assert.equal(second.remaining,0);assert.equal(second.remaining_observed_at,p.clock());
+ assert.equal(second.redeemed,undefined);assert.equal(second.earned,undefined);
+});
+test('invite reader: a valid nullable model stays unknown and never auto-generates',async()=>{
+ const p=invitePage(()=>inviteResponse(invitePayload({code:null,max_uses:null,use_count:null,uses_remaining:null})));
+ p.observer.snapshot(false,false);await settleInvite();const result=p.observer.snapshot(false,false);
+ assert.equal(p.calls.length,1);assert.equal(result.invite_status,'ok');assert.equal(result.invite,null);
+ p.advance(10000);p.observer.snapshot(true,false);await settleInvite();assert.equal(p.calls.length,1);
+});
+for(const status of [401,403])test(`invite reader: HTTP${status} pauses only its own automatic budget and preserves quota`,async()=>{
+ const p=invitePage(n=>n===1?inviteResponse(invitePayload()):inviteResponse({},status));
+ await p.context.fetch('https://muse.ai/api/subscription');await settleInvite();p.observer.snapshot(false,false);await settleInvite();
+ const before=p.observer.snapshot(false,false);p.advance(300000);p.observer.snapshot(false,false);await settleInvite();
+ let after=p.observer.snapshot(false,false);assert.equal(after.invite_status,status===401?'logged_out':'forbidden');
+ assert.equal(after.quota.used_percent,17);assert.equal(after.quota.observed_at,before.quota.observed_at);
+ assert.equal(after.invite.code_observed_at,before.invite.code_observed_at);assert.equal(after.invite.remaining_observed_at,before.invite.remaining_observed_at);
+ p.advance(21600000);for(let i=0;i<8;i++)p.observer.snapshot(true,false);await settleInvite();assert.equal(p.calls.length,2,'quota force cannot reset invite auth/403 pause');
+ await p.observer.refreshInvite(true);assert.equal(p.calls.length,3,'explicit manual refresh may retry');
+});
+test('invite reader: repeated manual auth retries are separated by at least thirty seconds',async()=>{
+ const p=invitePage(()=>inviteResponse({},401));p.observer.snapshot(false,false);await settleInvite();
+ await p.observer.refreshInvite(true);assert.equal(p.calls.length,1);
+ p.advance(29999);await p.observer.refreshInvite(true);assert.equal(p.calls.length,1);
+ p.advance(1);await p.observer.refreshInvite(true);assert.equal(p.calls.length,2);
+});
+test('invite reader:429 hard cooldown survives manual/quota force and expires automatically',async()=>{
+ const p=invitePage(n=>n===1?inviteResponse({},429,{'Retry-After':'600'}):inviteResponse(invitePayload()));
+ p.observer.snapshot(false,false);await settleInvite();assert.equal(p.observer.snapshot(false,false).invite_status,'rate_limited');
+ p.advance(599999);p.observer.snapshot(true,false);await p.observer.refreshInvite(true);assert.equal(p.calls.length,1);
+ p.advance(1);p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,2);assert.equal(p.observer.snapshot(false,false).invite.remaining,4);
+});
+test('invite reader:429 minimum, cap and HTTP-date remain hard bounded windows',async()=>{
+ for(const [value,delay] of [['0',300000],['999999',3600000],['invalid',300000],[new Date(1800000600000).toUTCString(),600000]]){
+  const p=invitePage(n=>n===1?inviteResponse({},429,{'Retry-After':value}):inviteResponse(invitePayload()));
+  p.observer.snapshot(false,false);await settleInvite();p.advance(delay-1);await p.observer.refreshInvite(true);assert.equal(p.calls.length,1);
+  p.advance(1);p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,2);
+ }
+});
+test('invite reader: short transport retries are bounded and successful quota cannot clear them',async()=>{
+ const p=invitePage(n=>{if(n<=3)throw Error('SYNTHETIC network failure');return inviteResponse(invitePayload());});
+ p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,1);
+ p.advance(1999);p.observer.snapshot(true,false);await settleInvite();assert.equal(p.calls.length,1);
+ p.advance(1);p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,2);
+ p.advance(9999);p.observer.snapshot(true,false);await settleInvite();assert.equal(p.calls.length,2);
+ p.advance(1);p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,3);
+ await p.context.fetch('https://muse.ai/api/subscription');await settleInvite();
+ p.advance(89999);p.observer.snapshot(true,false);await settleInvite();assert.equal(p.calls.length,3);
+ p.advance(1);p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,4);
+ assert.equal(p.observer.snapshot(false,false).quota.used_percent,17);
+});
+test('invite reader: old route response is discarded even when a new request finishes first',async()=>{
+ let release;const p=invitePage(n=>n===1?new Promise(r=>release=r):inviteResponse(invitePayload({code:'NEW777',uses_remaining:0})));
+ p.observer.snapshot(false,false);await settleInvite();p.context.location=new URL('https://muse.ai/chat/new');
+ p.observer.snapshot(false,false);await settleInvite();release(inviteResponse(invitePayload({code:'OLD666'})));await settleInvite();
+ const result=p.observer.snapshot(false,false);assert.equal(result.invite.code,'NEW777');assert.equal(result.invite.remaining,0);assert.equal(p.calls[0].options.signal.aborted,true);
+});
+test('invite reader: login/challenge epoch invalidates a late response and login recovery rereads',async()=>{
+ let release;const p=invitePage(n=>n===1?new Promise(r=>release=r):inviteResponse(invitePayload({code:'NEW777'})));
+ p.observer.snapshot(false,false);await settleInvite();p.challenge(true);p.observer.snapshot(false,false);
+ release(inviteResponse(invitePayload({code:'OLD666'})));await settleInvite();assert.equal(p.observer.snapshot(false,false).invite,null);
+ p.challenge(false);p.observer.snapshot(false,false);await settleInvite();assert.equal(p.observer.snapshot(false,false).invite.code,'NEW777');
+ p.context.location=new URL('https://muse.ai/login');assert.equal(p.observer.snapshot(false,false).invite,null);
+});
+test('invite reader: inactive native budget, untrusted/loading documents and login pages never GET',async()=>{
+ const p=invitePage();p.observer.snapshot(false,false,false);await settleInvite();assert.equal(p.calls.length,0);
+ p.context.document.readyState='loading';p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,0);
+ p.context.document.readyState='complete';p.context.location=new URL('https://untrusted.invalid/');p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,0);
+ p.context.location=new URL('https://muse.ai/login');p.observer.snapshot(false,false);await settleInvite();assert.equal(p.calls.length,0);
+});
+test('invite reader: oversized or malformed success cannot update any old observation',async()=>{
+ for(const invalid of [()=>new Response('x'.repeat(600001),{headers:{'Content-Type':'application/json'}}),()=>inviteResponse({code:'INVALID',max_uses:-1,use_count:0}),()=>new Response('<html>challenge</html>',{headers:{'Content-Type':'text/html'}}),()=>inviteResponse(invitePayload({code:'BAD666'}),503)]){
+  const p=invitePage(n=>n===1?inviteResponse(invitePayload()):invalid());p.observer.snapshot(false,false);await settleInvite();
+  const before=p.observer.snapshot(false,false).invite;p.advance(300000);p.observer.snapshot(false,false);await settleInvite();
+  const after=p.observer.snapshot(false,false).invite;assert.equal(after.code,before.code);assert.equal(after.observed_at,before.observed_at);
+ }
+});
+test('invite reader: request timeout is bounded even if a synthetic transport ignores abort',async()=>{
+ const p=invitePage(()=>new Promise(()=>{}),true);p.observer.snapshot(false,false);await settleInvite();
+ const timer=[...p.timers.values()].find(t=>t.delay===10000);assert.ok(timer,'fixed reader owns a ten-second deadline');timer.fn();await settleInvite();
+ assert.equal(p.calls[0].options.signal.aborted,true);assert.equal(p.observer.snapshot(false,false).invite_status,'retry_wait');
 });

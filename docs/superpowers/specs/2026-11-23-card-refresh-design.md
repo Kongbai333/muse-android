@@ -21,3 +21,11 @@ observer 保留 origin/sessionEpoch，401只在当前可信响应归登录失效
 ## R-A1 评审修正：暂态失败后有界自动恢复
 
 429只使用按账号的硬冷却（90秒至1小时，遵循既有Retry-After上限），到期由现有前台脉冲允许一次新采集，不再进入无限期人工暂停。普通失败前两次仍间隔1分钟；连续第3/4/5次及以后分别间隔15/30/60分钟，每个窗口只启动一个probe，成功重置失败预算并恢复5分钟成功间隔。取消不得缩短已有退避；登录恢复或手动意图仍不得绕过未到期的429。明确鉴权和403暂停、账号/路由/epoch及单任务守卫不变。没有新增定时器、并发轮询或无限的即时重试。
+
+## 已授权续接：固定只读邀请reader
+
+此前“无reader”是历史证据边界；PC owner已在用户授权的原WebView/代理中证实GET `/api/hatch/invite`，无query/body，module152222把page映射GET、generation映射POST，真实HTTP200的code/uses_remaining与页面及observer布尔一致。证据保存在项目外pc-authenticated-reader-findings及public-call-chain/comparison-before/network-structure，不含身份值。本轮按该确定契约直接实施，不重新调查或取得真实账号；不再需要设计确认。
+
+唯一方案沿现有observer的原fetch固定同origin GET，credentials=same-origin、cache=no-store、redirect=error、10秒超时及既有600000字节上限；不能经Java另建携Cookie客户端。就绪且非登录/验证页的首次snapshot自动读取。邀请使用独立单飞、成功5分钟间隔，短失败2/10/90秒及后续有界退避；429至少5分钟至1小时，401/403等待明确登录恢复或手动刷新（至少30秒，原生跨probe也保留）。QuotaSync用独立QuotaRefreshPolicy保留跨probe预算，不由额度成功重置，只有现有账号任务会开页面，不切换其他账号或跳设置页。等待邀请有界完成不应把成功额度判失败。
+
+GET只经现有nullable/safe-integer模型取code和uses_remaining，null/缺失不造0或无限；有效空模型表示当前无已知值而不自动生成。各字段原时间独立合并，失败不动额度/code/remaining时间；无依据的redeemed/earned不推导。会话epoch、请求serial及完整URL变更均使旧邀请结果失效，原生active probe/WorkPage导航和路由代次仍是宿主屏障。仅合成Node/Java验证及一次增量APK，不宣称Android真机/身份已通过。

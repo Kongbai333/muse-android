@@ -21,6 +21,8 @@ final class QuotaSync {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final HashMap<String, String> states = new HashMap<>();
     private final QuotaRefreshPolicy policy = new QuotaRefreshPolicy();
+    private final QuotaRefreshPolicy invitePolicy = new QuotaRefreshPolicy();
+    private final HashMap<String, Long> inviteManualAfter = new HashMap<>();
     private Probe active;
     private String script;
 
@@ -28,12 +30,14 @@ final class QuotaSync {
         final String account;
         final long started = SystemClock.elapsedRealtime();
         final long wallStarted = System.currentTimeMillis();
+        final boolean readInvite, manual;
+        boolean inviteFinished;
         boolean first = true;
         boolean evaluating, updated;
         long quotaReadyAt;
         MuseWeb.WorkPage page;
 
-        Probe(String account) { this.account = account; }
+        Probe(String account, boolean readInvite, boolean manual) { this.account = account; this.readInvite = readInvite; this.manual = manual; }
     }
 
     QuotaSync(Context context, MuseWeb browser, MuseAvatarCache avatars, Consumer<String> changed) {
@@ -60,14 +64,16 @@ final class QuotaSync {
         if (active != null && active.account.equals(account.id)) return;
         long elapsed = SystemClock.elapsedRealtime();
         if (!policy.allow(account.id, manual, elapsed)) return;
+        boolean readInvite = mayReadInvite(account.id, manual, elapsed);
         if (!manual) {
             AccountQuota old = value(account.id);
-            if (active != null || (old != null && old.currentWeek(System.currentTimeMillis()) && avatars.has(account.id))) return;
+            if (active != null || (!readInvite && old != null && old.currentWeek(System.currentTimeMillis()) && avatars.has(account.id))) return;
         }
         cancel();
-        Probe probe = new Probe(account.id);
+        Probe probe = new Probe(account.id, readInvite, manual);
         active = probe;
         policy.started(account.id, elapsed);
+        if (readInvite) { invitePolicy.started(account.id, elapsed); inviteManualAfter.put(account.id, elapsed + 30_000); }
         state(probe, "同步中…");
         try {
             if (script == null) script = MuseAdapters.source(context, "muse-observer.js");
@@ -89,12 +95,13 @@ final class QuotaSync {
         }
         if (http == 403) { end(probe, "未更新 · 网站暂未允许读取"); return; }
         if (http >= 400) { end(probe, "未更新 · 服务暂不可用"); return; }
-        if (SystemClock.elapsedRealtime() - probe.started >= 27_000) { end(probe, probe.updated ? "部分已更新 · 额度待重试" : "未更新 · 可稍后重试"); return; }
+        if (SystemClock.elapsedRealtime() - probe.started >= 27_000) { end(probe, probe.quotaReadyAt > 0 ? "额度已同步" : probe.updated ? "部分已更新 · 额度待重试" : "未更新 · 可稍后重试"); return; }
         if (probe.page != null && probe.page.ready() && !probe.evaluating) {
             boolean force = probe.first;
             probe.first = false;
             String expression = "JSON.stringify((()=>{const o=window.__museDesktopObserver?.snapshot(" + force
-                + ",true);return o&&{url:o.url,quota:o.quota,plan:o.plan,extra:o.extra,invite:o.invite,invite_status:o.invite_status,retry_after_ms:o.retry_after_ms,status:o.quota_status,avatar:o.avatar_png};})())";
+                + ",true," + (probe.readInvite && !probe.inviteFinished) + "," + (force && probe.manual)
+                + ");return o&&{url:o.url,quota:o.quota,plan:o.plan,extra:o.extra,invite:o.invite,invite_status:o.invite_status,invite_retry_after_ms:o.invite_retry_after_ms,retry_after_ms:o.retry_after_ms,status:o.quota_status,avatar:o.avatar_png};})())";
             probe.evaluating = true;
             probe.page.evaluate(expression, raw -> receive(probe, raw));
         }
@@ -122,6 +129,7 @@ final class QuotaSync {
             changed.accept(probe.account);
         }
         String status = result.optString("status");
+        receiveInvite(probe, result);
         if ("rate_limited".equals(status)) {
             long delay = Math.min(3_600_000, Math.max(90_000, result.optLong("retry_after_ms", 90_000)));
             policy.finished(probe.account, "rate", delay, SystemClock.elapsedRealtime());
@@ -131,7 +139,7 @@ final class QuotaSync {
         if ("forbidden".equals(status)) { end(probe, "未更新 · 网站暂未允许读取"); return; }
         if ("authentication_pending".equals(status)) { end(probe, "未更新 · 页面需要验证"); return; }
         if (("not_found".equals(status) || "request_failed".equals(status) || "unrecognized".equals(status) || "partial".equals(status))
-                && result.has("retry_after_ms") && result.isNull("retry_after_ms")) {
+                && result.has("retry_after_ms") && result.isNull("retry_after_ms") && (!probe.readInvite || probe.inviteFinished)) {
             end(probe, probe.updated ? "部分已更新 · 额度待重试" : "未更新 · 未取得有效数据"); return;
         }
         AccountQuota data = merged.quota(now);
@@ -139,8 +147,31 @@ final class QuotaSync {
             if (probe.quotaReadyAt == 0) probe.quotaReadyAt = SystemClock.elapsedRealtime();
             long held = SystemClock.elapsedRealtime() - probe.quotaReadyAt;
             if (held < 1500 || !avatars.has(probe.account) && held < 5_000) return;
+            if (probe.readInvite && !probe.inviteFinished) return;
             end(probe, "额度已同步");
         }
+    }
+
+    private boolean mayReadInvite(String account, boolean manual, long now) {
+        return (!manual || now >= inviteManualAfter.getOrDefault(account, 0L)) && invitePolicy.allow(account, manual, now);
+    }
+
+    private void receiveInvite(Probe probe, JSONObject result) {
+        if (active != probe || !probe.readInvite || probe.inviteFinished) return;
+        String status = result.optString("invite_status");
+        String outcome = switch (status) {
+            case "ok" -> "ok";
+            case "rate_limited" -> "rate";
+            case "logged_out" -> "auth";
+            case "forbidden" -> "forbidden";
+            case "request_failed", "unrecognized" -> "failure";
+            default -> null;
+        };
+        if (outcome == null) return;
+        probe.inviteFinished = true;
+        inviteManualAfter.put(probe.account, SystemClock.elapsedRealtime() + 30_000);
+        long delay = "rate".equals(outcome) ? Math.min(3_600_000, Math.max(300_000, result.optLong("invite_retry_after_ms", 300_000))) : 0;
+        invitePolicy.finished(probe.account, outcome, delay, SystemClock.elapsedRealtime());
     }
 
     private void loggedOut(Probe probe) {
@@ -154,12 +185,15 @@ final class QuotaSync {
         cache.edit().remove(account).apply();
         avatars.remove(account);
         policy.finished(account, "auth", 0, SystemClock.elapsedRealtime());
+        invitePolicy.finished(account, "auth", 0, SystemClock.elapsedRealtime());
         states.put(account, "请先登录");
         changed.accept(account);
     }
 
     void loginReady(String account) {
         policy.loginReady(account);
+        invitePolicy.loginReady(account);
+        inviteManualAfter.remove(account);
     }
 
     private static Map<String,Object> jsonMap(JSONObject object) { return jsonMap(object, 0); }
@@ -187,6 +221,8 @@ final class QuotaSync {
         if (probe.page != null) probe.page.close();
         String outcome = "额度已同步".equals(message) ? "ok" : message.contains("限流") ? "cancel"
             : message.contains("暂未允许") ? "forbidden" : message.contains("暂停") || message.contains("登录") ? "cancel" : "failure";
+        if (probe.readInvite && !probe.inviteFinished) invitePolicy.finished(probe.account,
+            "cancel".equals(outcome) || "forbidden".equals(outcome) ? outcome : "failure", 0, SystemClock.elapsedRealtime());
         policy.finished(probe.account, outcome, 0, SystemClock.elapsedRealtime());
         if (policy.paused(probe.account)) message += " · 点刷新重试";
         state(probe, message);
@@ -199,5 +235,7 @@ final class QuotaSync {
         cache.edit().remove(id).apply();
         states.remove(id);
         policy.remove(id);
+        invitePolicy.remove(id);
+        inviteManualAfter.remove(id);
     }
 }
