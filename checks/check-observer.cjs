@@ -448,3 +448,18 @@ test('invite reader: request timeout is bounded even if a synthetic transport ig
  const timer=[...p.timers.values()].find(t=>t.delay===10000);assert.ok(timer,'fixed reader owns a ten-second deadline');timer.fn();await settleInvite();
  assert.equal(p.calls[0].options.signal.aborted,true);assert.equal(p.observer.snapshot(false,false).invite_status,'retry_wait');
 });
+test('card polish: invitation parser forwards real nullable numerator/denominator without inferring infinity',()=>{
+ const zero=adapter.parseInviteModel(invitePayload({use_count:0,max_uses:0,uses_remaining:null}));
+ assert.equal(zero.use_count,0);assert.equal(zero.max_uses,0);assert.equal(zero.remaining,undefined);assert.equal(zero.redeemed,undefined);
+ const unknown=adapter.parseInviteModel(invitePayload({use_count:null,max_uses:null}));assert.equal(unknown.use_count,undefined);assert.equal(unknown.max_uses,undefined);
+ assert.equal(adapter.parseInviteModel(invitePayload({use_count:31,max_uses:30})),null);
+});
+test('card polish: invitation counter times merge independently and a partial response never refreshes the old numerator',async()=>{
+ const p=invitePage(n=>inviteResponse(invitePayload(n===1?{}:{code:null,use_count:null,max_uses:9,uses_remaining:null})));
+ await p.context.fetch('https://muse.ai/api/subscription');await settleInvite();p.observer.snapshot(false,false);await settleInvite();
+ const before=p.observer.snapshot(false,false);assert.equal(before.invite.use_count,1);assert.equal(before.invite.max_uses,5);
+ p.advance(300000);p.observer.snapshot(false,false);await settleInvite();const after=p.observer.snapshot(false,false);
+ assert.equal(after.invite.use_count,1);assert.equal(after.invite.use_count_observed_at,before.invite.use_count_observed_at);
+ assert.equal(after.invite.max_uses,9);assert.equal(after.invite.max_uses_observed_at,p.clock());
+ assert.equal(after.invite.code_observed_at,before.invite.code_observed_at);assert.equal(after.quota.observed_at,before.quota.observed_at);
+});

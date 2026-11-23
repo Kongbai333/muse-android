@@ -113,6 +113,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private boolean ready;
     private boolean studioPinned = true;
     private boolean themeReopenSidebar, themeShowSessions = true;
+    private boolean themeNight;
     private int themeGeneration, themeApplied;
     private boolean referenceLoading;
     private String referencePickerSession = "", studioReferenceSignature = "";
@@ -151,6 +152,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
     private void buildInterface(Bundle state) {
         ui = new MobileUi(this);
+        themeNight = MobileUi.NIGHT;
         proxies = new ProxyStore(this);
         accounts = new AccountStore(this, proxies);
         syncAccountOrder();
@@ -1547,33 +1549,43 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     /**
-     * 切换暗房 / 白昼：只重建原生界面（工作室、侧栏、悬浮头像），网页和正在进行的生成都保留，不刷新。
-     * 依赖清单里的 configChanges="uiMode"；万一系统仍未回调，就退回整页重建。
+     * 三态外观选择，只重建原生界面；不重新创建Activity或网页。
      */
     @Override public void toggleTheme() {
+        if (!ready || closing) return;
+        ThemeMode[] modes = ThemeMode.values();
+        String[] labels = new String[modes.length];
+        for (int i = 0; i < modes.length; i++) labels[i] = modes[i].label;
+        MobileUi.dialog(this).setTitle("外观")
+            .setSingleChoiceItems(labels, MobileUi.themeMode(this).ordinal(), (dialog, index) -> {
+                dialog.dismiss();
+                if (index >= 0 && index < modes.length) selectThemeMode(modes[index]);
+            }).setNegativeButton("取消", null).show();
+    }
+
+    private void selectThemeMode(ThemeMode mode) {
+        if (!ready || closing || mode == MobileUi.themeMode(this)) return;
         draftHandler.removeCallbacks(persistComposerHeight);
         persistComposerHeight.run();
         syncStudioDraft();
         studio.flushSessions();
         themeReopenSidebar = sidebar.isOpen();
         themeShowSessions = sidebar.showingSessions();
-        boolean target = !MobileUi.NIGHT;
         int generation = ++themeGeneration;
-        MobileUi.setDarkroom(this, target);
-        root.postDelayed(() -> {
-            if (isFinishing() || isDestroyed() || generation != themeGeneration) return;
-            MobileUi.load(this);
-            if (MobileUi.NIGHT != target) recreate();       // 没收到配置回调：退回旧方式
-            else if (themeApplied != generation) applyTheme(); // 资源已切换但界面还没重建
-        }, 450);
+        MobileUi.setThemeMode(this, mode);
+        root.post(() -> {
+            if (closing || isFinishing() || isDestroyed() || generation != themeGeneration) return;
+            getDelegate().applyDayNight();
+            if (themeApplied != generation) applyTheme(); // 同色模式变化也更新入口图标。
+        });
     }
 
     @Override public void onConfigurationChanged(@androidx.annotation.NonNull android.content.res.Configuration config) {
         super.onConfigurationChanged(config);
         if (!ready) return;
-        boolean night = (config.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+        boolean night = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-        if (night != MobileUi.NIGHT || themeApplied != themeGeneration) applyTheme();
+        if (night != themeNight || themeApplied != themeGeneration) applyTheme();
     }
 
     /** 用新配色重建原生界面；WebView 只是从旧容器挪到新容器，不会重新加载。 */
@@ -1584,6 +1596,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         syncStudioDraft();
         MobileUi.load(this);
         ui = new MobileUi(this);
+        themeNight = MobileUi.NIGHT;
         Window window = getWindow();
         window.setNavigationBarColor(BG);
         applyBarAppearance();

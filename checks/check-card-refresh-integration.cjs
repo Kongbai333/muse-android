@@ -1,6 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');
 const base=path.join(__dirname,'../app/src/main/java/com/muse/workspace/mobile');const read=n=>fs.readFileSync(path.join(base,n),'utf8');
 require('./check-account-menu-layout.cjs');
+require('./check-account-card-polish.cjs');
 test('card native cache persists independent rows and receives every allowed group',()=>{
  const s=read('QuotaSync.java');assert.match(s,/AccountCardState card\(/);assert.match(s,/\.merge\(jsonMap\(result/);assert.match(s,/new JSONObject\(.*\.rows\(\)\)/);
  for(const field of ['invite:o.invite','plan:o.plan','extra:o.extra'])assert.ok(s.includes(field),field);
@@ -66,8 +67,8 @@ test('invitation native terminal receipts and actual end preserve separate budge
  let result=spawnSync(executable('javac'),['-encoding','UTF-8','-d',out,path.join(base,'StudioDraft.java'),path.join(base,'QuotaRefreshPolicy.java'),file],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);
  result=spawnSync(executable('java'),['-cp',out,'com.muse.workspace.mobile.InviteSyncHarness'],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);process.stdout.write(result.stdout);
 });
-test('sidebar import choice is inert until selection and preserves both existing flow callbacks',()=>{
- const {spawnSync}=require('node:child_process'),source=read('AccountSidebar.java'),signature='private void showImportChoices()';
+test('sidebar transfer choice is inert until selection and preserves all three existing flow callbacks',()=>{
+ const {spawnSync}=require('node:child_process'),source=read('AccountSidebar.java'),signature='private void showTransferChoices()';
  const start=source.indexOf(signature);assert.ok(start>=0,'single import entry needs a choice dialog');let level=0,quote='',escaped=false,body;
  for(let i=source.indexOf('{',start);i<source.length;i++){const c=source[i];if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}
   if(c==='"'||c==="'"){quote=c;continue;}if(c==='{')level++;if(c==='}'&&--level===0){body=source.slice(start,i+1);break;}}assert.ok(body);
@@ -78,16 +79,17 @@ test('sidebar import choice is inert until selection and preserves both existing
   static final class Dialog {boolean dismissed;String[] labels;Choice selected;void dismiss(){dismissed=true;}void cancel(){dismiss();}void choose(int index){selected.selected(this,index);}}
   static final class Builder {final Dialog dialog=new Dialog();Builder setTitle(String title){return this;}Builder setItems(String[] labels,Choice choice){dialog.labels=labels;dialog.selected=choice;return this;}Builder setNegativeButton(String label,Object listener){if(listener!=null)throw new AssertionError("cancel must not start a flow");return this;}Dialog show(){MobileUi.shown=dialog;return dialog;}}
   static final class MobileUi {static Dialog shown;static Builder dialog(Object context){return new Builder();}}
-  static final class Host {int packages,cookies;void importAccounts(){if(!MobileUi.shown.dismissed)throw new AssertionError("dismiss before package flow");packages++;}void importCookieText(){if(!MobileUi.shown.dismissed)throw new AssertionError("dismiss before Cookie flow");cookies++;}}
+  static final class Host {int packages,cookies,outbound;void importAccounts(){if(!MobileUi.shown.dismissed)throw new AssertionError("dismiss before package flow");packages++;}void importCookieText(){if(!MobileUi.shown.dismissed)throw new AssertionError("dismiss before Cookie flow");cookies++;}void exportAccounts(){if(!MobileUi.shown.dismissed)throw new AssertionError("dismiss before export flow");outbound++;}}
   final Host host=new Host();Object getContext(){return this;}
   ${body}
   static int checks;static void require(boolean ok,String why){if(!ok)throw new AssertionError(why);checks++;}
-  public static void main(String[] args){SidebarChoiceHarness h=new SidebarChoiceHarness();h.showImportChoices();require(h.host.packages==0&&h.host.cookies==0,"showing dialog is inert");
-   require(Arrays.equals(MobileUi.shown.labels,new String[]{"加密账号包","Cookie文本"}),"both existing import forms remain offered");
-   MobileUi.shown.cancel();require(h.host.packages==0&&h.host.cookies==0,"cancel/back/outside do not select a flow");
-   h.showImportChoices();MobileUi.shown.choose(0);require(h.host.packages==1&&h.host.cookies==0,"package option selects only the original package flow");
-   h.showImportChoices();MobileUi.shown.choose(1);require(h.host.packages==1&&h.host.cookies==1,"Cookie option selects only the original text flow");
-   h.showImportChoices();MobileUi.shown.choose(-1);require(h.host.packages==1&&h.host.cookies==1,"invalid selection does not start either flow");
+  public static void main(String[] args){SidebarChoiceHarness h=new SidebarChoiceHarness();h.showTransferChoices();require(h.host.packages==0&&h.host.cookies==0&&h.host.outbound==0,"showing dialog is inert");
+   require(Arrays.equals(MobileUi.shown.labels,new String[]{"加密账号包","Cookie文本","账号及静态代理导出"}),"all three existing forms remain offered");
+   MobileUi.shown.cancel();require(h.host.packages==0&&h.host.cookies==0&&h.host.outbound==0,"cancel/back/outside do not select a flow");
+   h.showTransferChoices();MobileUi.shown.choose(0);require(h.host.packages==1&&h.host.cookies==0&&h.host.outbound==0,"package option selects only the original package flow");
+   h.showTransferChoices();MobileUi.shown.choose(1);require(h.host.packages==1&&h.host.cookies==1&&h.host.outbound==0,"Cookie option selects only the original text flow");
+   h.showTransferChoices();MobileUi.shown.choose(2);require(h.host.packages==1&&h.host.cookies==1&&h.host.outbound==1,"export option selects only the original static-proxy export flow");
+   h.showTransferChoices();MobileUi.shown.choose(-1);require(h.host.packages==1&&h.host.cookies==1&&h.host.outbound==1,"invalid selection does not start any flow");
    System.out.println("Actual sidebar import choice: "+checks+" checks passed; native dialog replaced, no files/accounts/network.");}
  }`;
  const file=path.join(out,'SidebarChoiceHarness.java');fs.writeFileSync(file,java);const executable=name=>process.env.JAVA_HOME?path.join(process.env.JAVA_HOME,'bin',name+(process.platform==='win32'?'.exe':'')):name;

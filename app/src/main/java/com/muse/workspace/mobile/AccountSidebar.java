@@ -11,6 +11,7 @@ import android.view.View;
 import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -411,47 +412,37 @@ final class AccountSidebar extends FrameLayout {
             : canAddAccount ? ui.primary("添加账号", () -> host.editAccount(null))
             : ui.note("更新 Android System WebView 或 Chrome 后可添加多个账号。", 0);
         footer.addView(action, new LinearLayout.LayoutParams(-1, -2));
-        if (!sessionsShown && !picking) {
-            LinearLayout transfers = ui.row();
-            TextView importButton = ui.single(ui.outline("导入…", this::showImportChoices));
-            importButton.setMinWidth(0);
-            importButton.setContentDescription("导入账号，选择加密账号包或Cookie文本");
-            importButton.setTooltipText("导入账号");
-            transfers.addView(importButton, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView exportButton = ui.single(ui.outline("导出…", host::exportAccounts));
-            exportButton.setMinWidth(0);
-            exportButton.setContentDescription("导出账号与代理");
-            exportButton.setTooltipText("导出账号与代理");
-            LinearLayout.LayoutParams exportPosition = new LinearLayout.LayoutParams(0, -2, 1);
-            exportPosition.setMarginStart(ui.dp(8));
-            transfers.addView(exportButton, exportPosition);
-            ui.block(footer, transfers, 8);
-        }
-
         navigation.removeAllViews();
-        navigation.addView(navRow(R.drawable.ic_studio, "工作室", "", studioActive, host::openStudio));
+        navigation.addView(settingsBar());
+    }
+
+    private View settingsBar() {
         int proxyCount = proxies.all().size();
         LinearLayout settings = ui.row();
         settings.addView(settingsIcon(R.drawable.ic_route, "代理设置", proxyCount == 0 ? "未配置代理" : proxyCount + " 条",
             proxyActive, host::openProxyManager));
-        settings.addView(settingsIcon(R.drawable.ic_theme, "外观", NIGHT ? "暗房" : "白昼", false, host::toggleTheme));
+        settings.addView(settingsIcon(MobileUi.themeIcon(getContext()), "外观", MobileUi.themeDescription(getContext()), false, host::toggleTheme));
         settings.addView(settingsIcon(R.drawable.ic_web_refresh, "检查更新", "", false, host::checkForUpdates));
-        ui.block(navigation, settings, 4);
+        settings.addView(settingsIcon(R.drawable.ic_transfer, "导入导出", "", false, this::showTransferChoices));
+        return settings;
     }
 
-    private void showImportChoices() {
-        MobileUi.dialog(getContext()).setTitle("导入账号")
-            .setItems(new String[]{"加密账号包", "Cookie文本"}, (dialog, index) -> {
+    private void showTransferChoices() {
+        MobileUi.dialog(getContext()).setTitle("导入导出")
+            .setItems(new String[]{"加密账号包", "Cookie文本", "账号及静态代理导出"}, (dialog, index) -> {
                 dialog.dismiss();
                 if (index == 0) host.importAccounts();
                 else if (index == 1) host.importCookieText();
+                else if (index == 2) host.exportAccounts();
             })
             .setNegativeButton("取消", null).show();
     }
 
     private View settingsIcon(int icon, String label, String value, boolean active, Runnable action) {
         String description = label + (value.isEmpty() ? "" : "，" + value) + (active ? "，已选中" : "");
-        View button = ui.iconButton(icon, description, active ? ACCENT : TEXT2, action);
+        ImageButton button = ui.iconButton(icon, description, active ? ACCENT : TEXT2, action);
+        button.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        ui.pad(button, 14, 14);
         button.setSelected(active);
         button.setMinimumWidth(ui.dp(48));
         button.setBackground(ui.touchable(active ? ACCENT_SOFT : Color.TRANSPARENT, 12, 0));

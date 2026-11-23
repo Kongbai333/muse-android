@@ -48,6 +48,8 @@ final class AccountCardState {
             long at=time(invite,now);
             put(next,"invite_code",invite.get("code"),fieldTime(invite,"code",at),now);
             put(next,"invite_remaining",invite.get("remaining"),fieldTime(invite,"remaining",at),now);
+            put(next,"invite_use_count",invite.get("use_count"),fieldTime(invite,"use_count",at),now);
+            put(next,"invite_max_uses",invite.get("max_uses"),fieldTime(invite,"max_uses",at),now);
             put(next,"invite_redeemed",invite.get("redeemed"),fieldTime(invite,"redeemed",at),now);
             put(next,"invite_earned",invite.get("earned"),fieldTime(invite,"earned",at),now);
         }
@@ -84,7 +86,12 @@ final class AccountCardState {
         return "剩余 "+decimal(remaining)+(total!=null&&total>=remaining?" / "+decimal(total):"");
     }
     String inviteCode(){Object value=value("invite_code");return value instanceof String?(String)value:"";}
+    Double extraRemaining(){return number(value("extra_remaining"));}
+    Double extraTotal(){return number(value("extra_total"));}
+    String extraDisplay(){Object value=value("extra_display");return value instanceof String?(String)value:"";}
     Long inviteRemaining(){return value("invite_remaining") instanceof Long n?n:null;}
+    Long inviteUseCount(){return value("invite_use_count") instanceof Long n?n:null;}
+    Long inviteMaxUses(){return value("invite_max_uses") instanceof Long n?n:null;}
     Long inviteRedeemed(){return value("invite_redeemed") instanceof Long n?n:null;}
     String inviteEarned(){Object value=value("invite_earned");return value instanceof String?(String)value:"";}
     long observed(String field){Field value=fields.get(field);return value==null?0:value.observed;}
@@ -103,7 +110,7 @@ final class AccountCardState {
             case "extra_remaining","extra_total"->normalized=number(value);
             case "extra_display"->normalized=text(value,96);
             case "invite_code"->{String code=text(value,16);if(code!=null&&code.toUpperCase(Locale.ROOT).matches("[A-Z0-9]{6,16}"))normalized=code.toUpperCase(Locale.ROOT);}
-            case "invite_remaining","invite_redeemed"->normalized=integer(value);
+            case "invite_remaining","invite_use_count","invite_max_uses","invite_redeemed"->normalized=integer(value);
             case "invite_earned"->normalized=text(value,96);
             default->{return;}
         }

@@ -35,13 +35,14 @@ import java.util.function.IntConsumer;
 
 /**
  * 「暗房」界面工具。颜色来自 muse_* 资源（values 为白昼，values-night 为暗房），
- * 在 Activity 创建时通过 {@link #load(Context)} 读取一次；切换主题会重建 Activity。
+ * 通过 {@link #load(Context)} 读取有效资源；外观变化只重建原生界面。
  */
 final class MobileUi {
-    static int BG, SURFACE, RAISED, LINE, LINE_STRONG, INK, TEXT2, MUTED, ACCENT, ON_ACCENT, ACCENT_SOFT, SCRIM;
+    static int BG, SURFACE, RAISED, LINE, LINE_STRONG, INK, TEXT2, MUTED, ACCENT, ON_ACCENT, ACCENT_SOFT, SCRIM, PROGRESS;
     static boolean NIGHT = true;
     static final String PREFS = "muse-ui";
     private static final String THEME_KEY = "theme-darkroom";
+    private static final String THEME_MODE_KEY = "theme-mode";
 
     final int chrome;
     private final Context context;
@@ -62,6 +63,7 @@ final class MobileUi {
         TEXT2 = context.getColor(R.color.muse_text2);
         MUTED = context.getColor(R.color.muse_muted);
         ACCENT = context.getColor(R.color.muse_accent);
+        PROGRESS = context.getColor(R.color.muse_progress);
         ON_ACCENT = context.getColor(R.color.muse_on_accent);
         ACCENT_SOFT = context.getColor(R.color.muse_accent_soft);
         SCRIM = context.getColor(R.color.muse_scrim);
@@ -69,19 +71,42 @@ final class MobileUi {
             == Configuration.UI_MODE_NIGHT_YES;
     }
 
-    /** 暗房为默认主题；白昼可在侧栏切换。 */
-    static boolean prefersDarkroom(Context context) {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(THEME_KEY, true);
+    static ThemeMode themeMode(Context context) {
+        SharedPreferences saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String stored = saved.getString(THEME_MODE_KEY, null);
+        Boolean legacy = saved.contains(THEME_KEY) ? saved.getBoolean(THEME_KEY, false) : null;
+        ThemeMode mode = ThemeMode.read(stored, legacy);
+        if (!mode.stored.equals(stored) || saved.contains(THEME_KEY))
+            saved.edit().putString(THEME_MODE_KEY, mode.stored).remove(THEME_KEY).apply();
+        return mode;
     }
 
     static void applyNightMode(Context context) {
-        int mode = prefersDarkroom(context) ? AppCompatDelegate.MODE_NIGHT_YES : AppCompatDelegate.MODE_NIGHT_NO;
+        int mode = switch (themeMode(context)) {
+            case LIGHT -> AppCompatDelegate.MODE_NIGHT_NO;
+            case DARK -> AppCompatDelegate.MODE_NIGHT_YES;
+            case SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM;
+        };
         if (AppCompatDelegate.getDefaultNightMode() != mode) AppCompatDelegate.setDefaultNightMode(mode);
     }
 
-    static void setDarkroom(Context context, boolean darkroom) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(THEME_KEY, darkroom).apply();
+    static void setThemeMode(Context context, ThemeMode mode) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(THEME_MODE_KEY, mode.stored).remove(THEME_KEY).apply();
         applyNightMode(context);
+    }
+
+    static int themeIcon(Context context) {
+        return switch (themeMode(context)) {
+            case LIGHT -> R.drawable.ic_theme_light;
+            case DARK -> R.drawable.ic_theme;
+            case SYSTEM -> R.drawable.ic_theme_system;
+        };
+    }
+
+    static String themeDescription(Context context) {
+        ThemeMode mode = themeMode(context);
+        return mode.label + (mode == ThemeMode.SYSTEM ? NIGHT ? "，当前黑夜" : "，当前白天" : "");
     }
 
     static MaterialAlertDialogBuilder dialog(Context context) {
@@ -608,7 +633,7 @@ final class MobileUi {
                 float left = index * (width + gap);
                 if (!known) paint.setColor(LINE);
                 else if (used == null) paint.setColor(LINE_STRONG);
-                else paint.setColor(index < filled ? (hot ? ACCENT : INK) : LINE_STRONG);
+                else paint.setColor(index < filled ? (hot ? ACCENT : PROGRESS) : LINE_STRONG);
                 canvas.drawRoundRect(left, 0, left + width, getHeight(), radius, radius, paint);
             }
         }

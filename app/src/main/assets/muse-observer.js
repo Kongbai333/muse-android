@@ -94,6 +94,8 @@
     const out={};
     if(node.code!==null && node.code!==undefined){if(typeof node.code!=='string' || !/^[A-Z0-9]{6,16}$/.test(node.code.trim().toUpperCase()))return null;out.code=node.code.trim().toUpperCase();}
     if(node.uses_remaining!==null && node.uses_remaining!==undefined)out.remaining=node.uses_remaining;
+    if(node.use_count!==null && node.use_count!==undefined)out.use_count=node.use_count;
+    if(node.max_uses!==null && node.max_uses!==undefined)out.max_uses=node.max_uses;
     return Object.keys(out).length || allowEmpty?out:null;
   }
   function parseCardResponse(text){
@@ -230,7 +232,7 @@
   let inviteStatus='waiting',inviteBusy=false,inviteFailures=0,inviteNext=0,inviteRateUntil=0,inviteManualAfter=0;
   let inviteSerial=0,inviteController=null,inviteRoute=location.href;
   function mergeInvite(found,at=Date.now()){
-    for(const key of ['code','remaining','redeemed','earned'])if(found?.[key]!==null && found?.[key]!==undefined){
+    for(const key of ['code','remaining','use_count','max_uses','redeemed','earned'])if(found?.[key]!==null && found?.[key]!==undefined){
       if(!invite)invite={};invite[key]=found[key];invite[key+'_observed_at']=at;invite.observed_at=at;
     }
   }

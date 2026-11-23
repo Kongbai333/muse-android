@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 暗房：默认主题。只保留一种强调色，用于主操作、当前选中项和额度告警。 -->
+    <!-- 黑夜色板；橙为主操作/额度告警，绿色只用于正常已用进度。 -->
     <color name="muse_bg">#FF0F0F11</color>
     <color name="muse_surface">#FF17171A</color>
     <color name="muse_raised">#FF222226</color>
@@ -10,6 +10,7 @@
     <color name="muse_text2">#FFA4A29C</color>
     <color name="muse_muted">#FF6D6C6F</color>
     <color name="muse_accent">#FFFF5B2E</color>
+    <color name="muse_progress">#FF4ADE80</color>
     <color name="muse_on_accent">#FF170803</color>
     <color name="muse_accent_soft">#21FF5B2E</color>
     <color name="muse_scrim">#9E000000</color>

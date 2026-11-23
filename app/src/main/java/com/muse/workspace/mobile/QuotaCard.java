@@ -1,7 +1,6 @@
 package com.muse.workspace.mobile;
 
 import android.content.Context;
-import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -14,13 +13,15 @@ import static com.muse.workspace.mobile.MobileUi.*;
 
 /** 账号卡上的额度区：周额度刻度条、重置日期与邀请额度。 */
 final class QuotaCard {
-    private final TextView week, reset, invite, code, uses, details, note;
+    private final TextView week, reset, extraLabel, inviteLabel, note;
     private final View ticks;
+    private final Context context;
     private final Consumer<String> planChanged;
     final LinearLayout view;
 
     QuotaCard(Context context, MobileUi ui, Consumer<String> planChanged) {
         this.planChanged = planChanged;
+        this.context = context;
         view = ui.column();
 
         LinearLayout top = ui.row();
@@ -49,27 +50,14 @@ final class QuotaCard {
 
         LinearLayout invitation = ui.row();
         invitation.setBaselineAligned(true);
-        invite = ui.single(ui.text("额外 未知", 12, TEXT2, false));
-        invite.setMinWidth(0);
-        LinearLayout.LayoutParams extraPosition = new LinearLayout.LayoutParams(0, -2, 0.34f);
-        extraPosition.setMarginEnd(ui.dp(6));
-        invitation.addView(invite, extraPosition);
-        code = ui.single(ui.text("邀请码 未知", 12, TEXT2, false));
-        code.setMinWidth(0);
-        LinearLayout.LayoutParams codePosition = new LinearLayout.LayoutParams(0, -2, 0.46f);
-        codePosition.setMarginEnd(ui.dp(6));
-        invitation.addView(code, codePosition);
-        uses = ui.single(ui.text("余 —", 12, TEXT2, false));
-        uses.setMinWidth(0);
-        uses.setGravity(Gravity.END);
-        invitation.addView(uses, new LinearLayout.LayoutParams(0, -2, 0.20f));
-        details = ui.text("", 11, TEXT2, false);
-        details.setMaxLines(2);
-        details.setEllipsize(TextUtils.TruncateAt.END);
-        details.setVisibility(View.GONE);
+        extraLabel = label(ui, "额外 —");
+        LinearLayout.LayoutParams extraPosition = new LinearLayout.LayoutParams(0, -2, 1);
+        extraPosition.setMarginEnd(ui.dp(8));
+        invitation.addView(extraLabel, extraPosition);
+        inviteLabel = label(ui, "邀请码 —/—");
+        invitation.addView(inviteLabel, new LinearLayout.LayoutParams(0, -2, 1));
         note = ui.text("待同步", 11, MUTED, false);
         ui.block(view, invitation, 7);
-        ui.block(view, details, 3);
         ui.block(view, note, 5);
     }
 
@@ -91,38 +79,35 @@ final class QuotaCard {
         reset.setText(day);
         reset.setTooltipText(day);
         reset.setVisibility(day.isEmpty() ? View.GONE : View.VISIBLE);
-        long extraAt = Math.max(card.observed("extra_remaining"), card.observed("extra_display"));
         long usageAt = data == null ? 0 : data.observed();
-        boolean oldExtra = old(extraAt, now) || extraAt < usageAt;
-        String fullExtra = card.extraText().isEmpty() ? "额外额度，未知" : "额外额度，" + (oldExtra ? "上次，" : "") + card.extraText();
-        String extraValue = card.extraText().startsWith("剩余 ") ? card.extraText().substring(3) : card.extraText();
-        invite.setText(extraValue.isEmpty() ? "额外 未知" : (oldExtra ? "旧额外 " : "额外 ") + extraValue.replace(" / ", "/"));
-        invite.setContentDescription(fullExtra);
-        invite.setTooltipText(fullExtra);
-        boolean oldCode = old(card.observed("invite_code"), now) || card.observed("invite_code") < usageAt;
-        boolean oldUses = old(card.observed("invite_remaining"), now) || card.observed("invite_remaining") < usageAt;
-        String fullCode = card.inviteCode().isEmpty() ? "邀请码，未知" : (oldCode ? "上次邀请码，" : "邀请码，") + card.inviteCode();
-        code.setText(card.inviteCode().isEmpty() ? "邀请码 未知" : (oldCode ? "旧码 " : "邀请码 ") + card.inviteCode());
-        code.setContentDescription(fullCode);
-        code.setTooltipText(fullCode);
-        String count = card.inviteRemaining() == null ? "余 —" : (oldUses ? "旧" : "余") + card.inviteRemaining() + "次";
-        String fullUses = card.inviteRemaining() == null ? "剩余次数，未知" : (oldUses ? "上次，" : "") + "还可使用 " + card.inviteRemaining() + " 次";
-        uses.setText(count);
-        uses.setContentDescription(fullUses);
-        uses.setTooltipText(fullUses);
-        String other = card.inviteRedeemed() == null ? "" : (old(card.observed("invite_redeemed"), now) || card.observed("invite_redeemed") < usageAt ? "上次 " : "") + card.inviteRedeemed() + " 位好友已兑现";
-        if (!card.inviteEarned().isEmpty()) other += (other.isEmpty() ? "" : " · ")
-            + (old(card.observed("invite_earned"), now) || card.observed("invite_earned") < usageAt ? "上次 " : "") + "已赚取 " + card.inviteEarned();
-        details.setText(other);
-        details.setContentDescription(other);
-        details.setTooltipText(other);
-        details.setVisibility(other.isEmpty() ? View.GONE : View.VISIBLE);
+        String extraText = AccountCardLabels.extra(card), inviteText = AccountCardLabels.invitation(card);
+        String extraDetails = AccountCardLabels.extraDetails(card), inviteDetails = AccountCardLabels.inviteDetails(card);
+        extraLabel.setText(extraText);
+        extraLabel.setContentDescription(extraText + "，点按查看精确额度和成功时间");
+        extraLabel.setTooltipText(extraDetails);
+        extraLabel.setOnClickListener(ignored -> showLabelDetails("额外额度", extraDetails));
+        inviteLabel.setText(inviteText);
+        inviteLabel.setContentDescription(inviteText + "，点按查看真实邀请码、剩余次数和成功时间");
+        inviteLabel.setTooltipText(inviteDetails);
+        inviteLabel.setOnClickListener(ignored -> showLabelDetails("邀请信息", inviteDetails));
         long at = data == null ? card.lastSuccess() : data.observed();
         String when = at <= 0 ? "" : " · 上次 " + new SimpleDateFormat("M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(at));
-        note.setText(current ? "额度已同步" + when : (state.startsWith("未更新") || state.contains("同步中") || state.contains("登录") || state.startsWith("部分") ? state : "未更新") + when);
+        String sync = current ? "额度已同步" : state.startsWith("未更新") || state.contains("同步中") || state.contains("登录") || state.startsWith("部分") ? state : "未更新";
+        note.setText(sync + when + (AccountCardLabels.cached(card, now, usageAt) ? " · 标签含缓存" : ""));
         view.setContentDescription("周额度 " + week.getText() + (day.isEmpty() ? "" : "，" + day)
-            + "，" + fullExtra + "，" + fullCode + "，" + fullUses + (other.isEmpty() ? "" : "，" + other) + "，" + note.getText());
+            + "，" + extraText + "，" + inviteText + "，" + note.getText());
     }
 
-    private static boolean old(long observed, long now) { return observed <= 0 || now - observed >= 300_000; }
+    private TextView label(MobileUi ui, String text) {
+        TextView label = ui.single(ui.text(text, 12, TEXT2, false));
+        label.setMinWidth(0);
+        label.setMinimumHeight(ui.dp(32));
+        label.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6));
+        ui.touch(label, RAISED, 10, LINE, () -> { });
+        return label;
+    }
+
+    private void showLabelDetails(String title, String text) {
+        MobileUi.dialog(context).setTitle(title).setMessage(text).setPositiveButton("关闭", null).show();
+    }
 }

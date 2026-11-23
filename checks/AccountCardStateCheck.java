@@ -46,6 +46,20 @@ public final class AccountCardStateCheck {
         AccountCardState roundtrip=AccountCardState.read(old.rows(),NOW+600006);
         require(roundtrip.lastSuccess()==old.lastSuccess()&&roundtrip.inviteRemaining()==3L&&roundtrip.inviteCode().equals("SYNTH6"),"persisted field rows restore original values/times");
         require(AccountCardState.read(map(),NOW).quota(NOW)==null,"unknown has no synthetic zero");
+        AccountCardState counters=partial.merge(map("invite",map("use_count",0L,"max_uses",30L,"observed_at",NOW+600004)),NOW+600004);
+        Map<?,?> counterFields=(Map<?,?>)counters.rows().get("fields");
+        require(counterFields.containsKey("invite_use_count")&&counterFields.containsKey("invite_max_uses"),"real invitation numerator and denominator are persisted independently");
+        require(((Map<?,?>)counterFields.get("invite_use_count")).get("value").equals(0L),"observed zero numerator is a value");
+        AccountCardState missing=counters.merge(map("invite",map("use_count",null,"max_uses",null,"observed_at",NOW+600005)),NOW+600005);
+        require(missing.observed("invite_use_count")==NOW+600004&&missing.observed("invite_max_uses")==NOW+600004,"nullable counters retain original values and times");
+        AccountCardState denominator=missing.merge(map("invite",map("max_uses",0L,"observed_at",NOW+600006)),NOW+600006);
+        require(denominator.observed("invite_max_uses")==NOW+600006&&denominator.observed("invite_use_count")==NOW+600004,"zero denominator is real zero and only its own time changes");
+        require(denominator.observed("usage")==partial.observed("usage")&&denominator.inviteRedeemed().equals(partial.inviteRedeemed()),"use_count never becomes quota or redeemed friends");
+        AccountCardState restored=AccountCardState.read(denominator.rows(),NOW+600007);
+        require(restored.rows().equals(denominator.rows()),"new optional counters and original observations restore from schema2");
+        AccountCardState invalid=restored.merge(map("invite",map("use_count",-1L,"max_uses",9007199254740992L,"observed_at",NOW+600008)),NOW+600008);
+        require(invalid.rows().equals(restored.rows()),"invalid or unsafe counters cannot replace known values");
+        require(AccountCardState.read(partial.rows(),NOW+600007).observed("invite_max_uses")==0,"older cache never invents a denominator");
         System.out.println("Card field cache: "+checks+" checks passed; synthetic only, no native preferences/network.");
     }
     private static Map<String,Object> map(Object... values){Map<String,Object> r=new LinkedHashMap<>();for(int i=0;i<values.length;i+=2)r.put((String)values[i],values[i+1]);return r;}
