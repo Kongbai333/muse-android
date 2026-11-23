@@ -47,4 +47,16 @@ Interfaces: QuotaSync.card(String):AccountCardState; existing value/state retain
 - [x] Wire independent merges and stale labels, serialize evaluation, invalidate canceled callbacks; add lifecycle/current-account throttled triggers without background account switching; GREEN focused checks (4 source boundaries; 13 real pure-Java retry policy cases). Full observer plus native boundaries:28 pass.
 - [x] Review diff and prepare the separate #15 commit, update android-findings with exact source limitations, then proceed to #16. Targeted javac against the real existing Android/AndroidX compile classpath succeeded; final Gradle/native build and mandatory existing contracts remain deferred until both additions are complete.
 
-Ruling: narrow QuotaRefreshPolicy owns monotonic request budgets and is host-testable; native QuotaSync still exclusively owns page/probe/cache. A429 or403 pauses automatic attempts;3 ordinary failures pause automatic retries, manual action can reset budget after hard Retry-After. Explicit login transition resumes auth pause. This adds no timer/network client and avoids endless current-account polling.
+Ruling (superseded by R-A1 below): the original policy indefinitely paused automatic attempts on429 or3 ordinary failures. This was too broad for transient failures;403/auth pauses remain intentional.
+
+### Review R-A1: Recover automatically after transient cooldowns
+
+Files: QuotaRefreshPolicy.java, checks/QuotaRefreshPolicyCheck.java; spec above. Keep the existing allow/started/finished/loginReady/paused/remove interfaces and all QuotaSync/MainActivity ownership gates.
+
+- [x] Replace permanent-pause expectations with real-clock-input behavioral RED cases:429 recovers at expiry including after end's cancel notification; first two failures wait1minute, then15/30/60minute bounded attempts; repeated failures stay capped and success resets; manual/login cannot bypass a hard rate limit. Retain403/auth/account isolation tests.
+- [x] Run focused javac plus the policy check's `rate` and `failure` cases; preserve both expected behavior failures and exit codes outside the repo. Compilation0, each behavior case1 on the original policy.
+- [x] Reserve indefinite automaticPaused for403; keep rateUntil monotonic, add capped timed ordinary-failure backoff, and prevent cancel from shortening a reservation. No caller, timer, routing, cache or authentication change.
+- [x] Run the full focused policy program GREEN (46 checks) and the unchanged reviewer's original probe, also against actual Gradle-produced policy classes. One incremental assembleDebug succeeded22s; package/debug signature/metadata/checksum passed. Previous full verification remains history.
+- [x] Finish only bounded cached module/reference-repo invitation tracing and record the remaining gap in external findings/ready. Reference fixed commit f7f5be5 has a UI-driven Settings quota reader and local dispatch use_count, not a verified invitation reader. No push/main/tag/CI/Release;#14hold remains. This local theme commit is the review deliverable.
+
+Ruling: this review explicitly limits verification to affected policy and incremental build, so the previous19-program full run is not repeated. The existing60second foreground pulse consumes a recovery opportunity only when host/page/route/profile gates and the single-probe guard allow work.

@@ -21,13 +21,18 @@ final class QuotaRefreshPolicy {
     }
     void started(String id,long now){nextAuto.put(id,now+60000);}
     void finished(String id,String result,long delay,long now){
-        nextAuto.put(id,now+(result.equals("ok")?300000:60000));
+        // end() may report cancellation after a rate result; never shorten its reservation.
+        nextAuto.merge(id,now+60000,Math::max);
         switch(result){
-            case "ok"->{failures.remove(id);automaticPaused.remove(id);}
+            case "ok"->{failures.remove(id);automaticPaused.remove(id);nextAuto.put(id,now+300000);}
             case "auth"->authPaused.add(id);
-            case "rate"->{rateUntil.put(id,now+Math.min(3600000,Math.max(90000,delay)));automaticPaused.add(id);}
+            case "rate"->rateUntil.merge(id,now+Math.min(3600000,Math.max(90000,delay)),Math::max);
             case "forbidden"->automaticPaused.add(id);
-            case "failure"->{int count=failures.getOrDefault(id,0)+1;failures.put(id,count);if(count>=3)automaticPaused.add(id);}
+            case "failure"->{
+                int count=Math.min(5,failures.getOrDefault(id,0)+1);failures.put(id,count);
+                // After three transient failures, reserve one recovery attempt per15/30/60min.
+                nextAuto.put(id,now+(count<3?60000:900000L<<(count-3)));
+            }
             default->{ /* Cancellation is not a failed server attempt. */ }
         }
     }
