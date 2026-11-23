@@ -307,3 +307,14 @@ test('card: passive invitation parsing never reads password or hidden input valu
  box.querySelectorAll=s=>s==='input'?[{type:'text',value:'SYNTH6'}]:[];
  assert.equal(adapter.parseInvite(root).code,'SYNTH6','ordinary user-opened site dialog is still readable');
 });
+test('card: a failed passive HTTP response cannot refresh values or successful observation time',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs');let status=200,clock=1800000000000;class Clock extends Date{static now(){return clock;}}
+ const context={URL,Headers,AbortController,TextDecoder,Uint8Array,setTimeout,clearTimeout,Date:Clock,location:new URL('https://muse.ai/'),
+  document:{readyState:'complete',body:{innerText:'SYNTHETIC app',querySelectorAll:()=>[]},querySelectorAll:()=>[]},
+  fetch:async()=>new Response(JSON.stringify(sample({state:'AVAILABLE',percentUsed:status===200?17:88})),{status}),getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
+ context.window=context;context.top=context;vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
+ await context.fetch('https://muse.ai/api/subscription');for(let i=0;i<8;i++)await new Promise(setImmediate);
+ const before=context.__museDesktopObserver.snapshot(false,false).quota;assert.equal(before.used_percent,17);
+ status=503;clock+=1000;await context.fetch('https://muse.ai/api/subscription');for(let i=0;i<8;i++)await new Promise(setImmediate);
+ const after=context.__museDesktopObserver.snapshot(false,false).quota;assert.equal(after.used_percent,17);assert.equal(after.observed_at,before.observed_at);
+});

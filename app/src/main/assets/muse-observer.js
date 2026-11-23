@@ -374,7 +374,7 @@
         const headers=new Headers(args[1]?.headers || (input && input.headers) || {});
         if (url.origin === location.origin && (/\/api\/(?:subscription|usage|billing)(?:\/|$)/.test(url.pathname)
           || (action && headers.get('Next-Action') === action))) {
-          pending.then(response => boundedText(response.clone()).then(text=>accept(text,epoch))).catch(()=>{});
+          pending.then(response => response.ok ? boundedText(response.clone()).then(text=>accept(text,epoch)) : null).catch(()=>{});
         }
         if (url.origin === location.origin && /\/api\/(?:chat|messages)(?:\/|$)/.test(url.pathname)) {
           pending.then(()=>setTimeout(()=>refresh(true),8000)).catch(()=>{});
