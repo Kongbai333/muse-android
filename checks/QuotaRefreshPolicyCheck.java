@@ -17,7 +17,12 @@ public final class QuotaRefreshPolicyCheck {
         require(p.allow("SYNTHETIC_B",false,now),"account budgets are isolated");
         p.finished("SYNTHETIC_A","forbidden",0,now);require(!p.allow("SYNTHETIC_A",false,now+9900000),"403 is paused, not cache deletion or infinite retry");
         p.remove("SYNTHETIC_A");require(p.allow("SYNTHETIC_A",false,now),"removed account has no orphan policy state");
-        System.out.println("Quota retry policy: 13 synthetic checks passed; no timer or network.");
+        require(!QuotaRefreshPolicy.confirmedLogin(false,false,"https://muse.ai/login"),"loading login redirect is not verified logout");
+        require(!QuotaRefreshPolicy.confirmedLogin(false,true,"https://untrusted.invalid/login"),"foreign challenge cannot clear Muse cache");
+        require(QuotaRefreshPolicy.confirmedLogin(false,true,"https://muse.ai/login"),"completed trusted login page is explicit");
+        require(QuotaRefreshPolicy.confirmedLogin(true,false,"https://muse.ai/"),"current trusted main-frame401 is explicit");
+        require(QuotaRefreshPolicy.httpRetryAfter("120",1800000000000L)==120000,"main-frame429 respects numeric Retry-After");
+        System.out.println("Quota retry/auth policy: 18 synthetic checks passed; no timer or network.");
     }
     private static void require(boolean value,String reason){if(!value)throw new AssertionError(reason);}
 }

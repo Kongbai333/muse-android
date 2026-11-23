@@ -5,6 +5,12 @@ import java.util.HashSet;
 
 /** Monotonic-clock request budget only; never owns values or their observation timestamps. */
 final class QuotaRefreshPolicy {
+    static boolean confirmedLogin(boolean unauthorized,boolean loaded,String url){return StudioDraft.trustedUrl(url)&&(unauthorized||loaded&&StudioDraft.loginPage(url));}
+    static long httpRetryAfter(String value,long now){
+        if(value==null)return 90000;
+        try{long seconds=Long.parseLong(value.trim());return seconds<0?90000:Math.max(90000,Math.min(3600,seconds)*1000);}
+        catch(NumberFormatException error){try{return Math.min(3600000,Math.max(90000,java.time.ZonedDateTime.parse(value,java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()-now));}catch(RuntimeException ignored){return 90000;}}
+    }
     private final HashMap<String,Long> nextAuto=new HashMap<>(),rateUntil=new HashMap<>();
     private final HashMap<String,Integer> failures=new HashMap<>();
     private final HashSet<String> authPaused=new HashSet<>(),automaticPaused=new HashSet<>();

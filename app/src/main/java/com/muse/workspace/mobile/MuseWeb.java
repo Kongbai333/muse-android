@@ -50,6 +50,8 @@ final class MuseWeb {
     private final android.content.SharedPreferences settings;
     private ProxyHub hub;
     private final java.util.WeakHashMap<WebView, AccountStore.Account> owners = new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<WebView, Integer> mainStatuses = new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<WebView, Boolean> loginReported = new java.util.WeakHashMap<>();
     private FrameLayout workerHost;
     private WebView view;
     private WorkPage worker;
@@ -126,6 +128,14 @@ final class MuseWeb {
     boolean preparing() { return wantsBrowser && view == null && (preparing || routeReady); }
     boolean usingProxy() { return usingProxy; }
     boolean transferring() { return transferActive; }
+    boolean pageReady() { return view != null && !loading && mainStatuses.getOrDefault(view, 0) == 200; }
+    boolean consumeLoginRequired() {
+        if (view == null || Boolean.TRUE.equals(loginReported.get(view))) return false;
+        int status = mainStatuses.getOrDefault(view, 0);
+        if (!QuotaRefreshPolicy.confirmedLogin(status == 401, pageReady(), view.getUrl())) return false;
+        loginReported.put(view, true);
+        return true;
+    }
     boolean canGoBack() { return view != null && view.canGoBack(); }
 
     void open(AccountStore.Account selected, boolean profiles) {
@@ -720,7 +730,13 @@ final class MuseWeb {
     }
 
     private final class Client extends RouteClient {
+        @Override public void doUpdateVisitedHistory(WebView web, String url, boolean reload) {
+            if (web == view) host.browserChanged();
+        }
+
         @Override public void onPageStarted(WebView web, String url, android.graphics.Bitmap favicon) {
+            mainStatuses.put(web, 0);
+            loginReported.remove(web);
             if (web != view) return;
             microphone.cancelPending();
             loading = true;
@@ -728,16 +744,26 @@ final class MuseWeb {
         }
 
         @Override public void onPageFinished(WebView web, String url) {
-            if (web != view || !url.equals(web.getUrl())) return;
+            if (!url.equals(web.getUrl())) return;
+            if (mainStatuses.getOrDefault(web, 0) == 0) mainStatuses.put(web, 200);
+            if (web != view) return;
             loading = false;
             host.browserChanged();
         }
 
         @Override public void onReceivedError(WebView web, WebResourceRequest request, WebResourceError error) {
-            if (web != view || !request.isForMainFrame()) return;
+            if (!request.isForMainFrame() || !request.getUrl().toString().equals(web.getUrl())) return;
+            mainStatuses.put(web, -1);
+            if (web != view) return;
             loading = false;
             notice = usingProxy ? "网页加载失败，请检查账号代理后重试。" : "网页加载失败，请检查网络后刷新。";
             host.browserChanged();
+        }
+
+        @Override public void onReceivedHttpError(WebView web, WebResourceRequest request, WebResourceResponse error) {
+            if (!request.isForMainFrame() || !request.getUrl().toString().equals(web.getUrl())) return;
+            mainStatuses.put(web, error.getStatusCode());
+            if (web == view) host.browserChanged();
         }
 
         @Override public boolean onRenderProcessGone(WebView web, RenderProcessGoneDetail detail) {
@@ -762,6 +788,8 @@ final class MuseWeb {
         private final Consumer<String> failure;
         private WebView web;
         private boolean loaded, installed, loginRequired;
+        private int responseStatus;
+        private String responseRetryAfter;
         private int navigation;
 
         WorkPage(String initial, String script, Consumer<String> failure) {
@@ -778,6 +806,8 @@ final class MuseWeb {
                         navigation++;
                         loaded = installed = false;
                         loginRequired = false;
+                        responseStatus = 0;
+                        responseRetryAfter = null;
                     }
 
                     @Override public void onPageFinished(WebView page, String url) {
@@ -791,11 +821,15 @@ final class MuseWeb {
                     }
 
                     @Override public void onReceivedError(WebView page, WebResourceRequest request, WebResourceError error) {
-                        if (page == web && request.isForMainFrame()) fail(usingProxy ? "后台网页未能打开，请检查账号代理。" : "后台网页未能打开，请检查网络。");
+                        if (page == web && request.isForMainFrame() && request.getUrl().toString().equals(page.getUrl())) fail(usingProxy ? "后台网页未能打开，请检查账号代理。" : "后台网页未能打开，请检查网络。");
                     }
 
                     @Override public void onReceivedHttpError(WebView page, WebResourceRequest request, WebResourceResponse error) {
-                        if (page == web && request.isForMainFrame() && error.getStatusCode() == 401) loginRequired = true;
+                        if (page != web || !request.isForMainFrame() || !request.getUrl().toString().equals(page.getUrl())) return;
+                        responseStatus = error.getStatusCode();
+                        if (responseStatus == 401) loginRequired = true;
+                        if (error.getResponseHeaders() != null) for (var header : error.getResponseHeaders().entrySet())
+                            if (header.getKey() != null && header.getKey().equalsIgnoreCase("Retry-After")) responseRetryAfter = header.getValue();
                     }
 
                     @Override public boolean onRenderProcessGone(WebView page, RenderProcessGoneDetail detail) {
@@ -815,6 +849,10 @@ final class MuseWeb {
         boolean needsLogin() {
             return web != null && (loginRequired || (loaded && (!StudioDraft.trustedUrl(web.getUrl()) || StudioDraft.loginPage(web.getUrl()))));
         }
+
+        boolean confirmedLoginRequired() { return web != null && QuotaRefreshPolicy.confirmedLogin(loginRequired, loaded && responseStatus < 400, web.getUrl()); }
+        int httpStatus() { return responseStatus; }
+        String retryAfterHeader() { return responseRetryAfter; }
 
         boolean ready() {
             return installed && web != null && StudioDraft.trustedUrl(web.getUrl()) && !StudioDraft.loginPage(web.getUrl());

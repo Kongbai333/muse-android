@@ -180,7 +180,8 @@
   // code and counts from it then; nothing is clicked and no request is sent.
   function inviteCode(box){
     const values=[
-      ...Array.from(box.querySelectorAll('input')).slice(0,8).map(input=>input.value),
+      ...Array.from(box.querySelectorAll('input')).slice(0,8)
+        .filter(input=>!['password','hidden','email','tel'].includes(String(input.type||'text').toLowerCase())).map(input=>input.value),
       ...Array.from(box.querySelectorAll('*')).slice(0,400).filter(el=>el.children.length===0).map(el=>el.textContent),
     ];
     for(const raw of values){
@@ -223,12 +224,12 @@
   const nativeFetch=root.fetch.bind(root);
   let quota=null, action=null, busy=false, scanned=0, lastCode='waiting';
   let cardPlan=null,cardExtra=null,failures=0,nextAllowed=0,rateLimitUntil=0,requestSerial=0,activeController=null;
-  let sessionEpoch=0, wasLoggedOut=false, avatar=null, avatarChecked=0;
+  let sessionEpoch=0, wasLoggedOut=false, wasChallenge=false, avatar=null, avatarChecked=0;
   let avatarRecording=null;
   let invite=null, inviteChecked=0;
   // Passive only. A visible dialog or a proven payload is not a hidden read API.
   async function refreshInvite(){
-    if(!trusted(location.href) || wasLoggedOut || !contentReady(root))return 'skip';
+    if(!trusted(location.href) || wasLoggedOut || wasChallenge || !contentReady(root))return 'skip';
     const open=parseInvite(root);
     if(open){invite={...open,observed_at:Date.now()};return 'ok';}
     return 'not_available';
@@ -244,7 +245,7 @@
     avatarRecording=recording;
     recording.timer=root.setInterval(()=>{
       if(recording.done || avatarRecording!==recording)return;
-      if(!trusted(location.href) || wasLoggedOut || /\/(?:login|signin|sign-in)(?:\/|$)/i.test(location.pathname)){
+      if(!trusted(location.href) || wasLoggedOut || wasChallenge || /\/(?:login|signin|sign-in)(?:\/|$)/i.test(location.pathname)){
         stopAvatarRecording(true);return;
       }
       const frame=captureAvatar(root);
@@ -255,7 +256,7 @@
   let preload=null, settingsLoaded=false, moduleContext=null;
   const seenScripts=new Set();
   const accept=(text,epoch=sessionEpoch) => {
-    if (epoch !== sessionEpoch || wasLoggedOut || !trusted(location.href)) return false;
+    if (epoch !== sessionEpoch || wasLoggedOut || wasChallenge || !trusted(location.href)) return false;
     const found=parseCardResponse(text),at=Date.now();
     if(found.quota)quota={...found.quota,observed_at:at};
     if(found.plan)cardPlan={...found.plan,observed_at:at};
@@ -326,7 +327,7 @@
     settingsLoaded=true;
   }
   async function refresh(force=false) {
-    if (!trusted(location.href) || busy || Date.now()<rateLimitUntil || (!force && Date.now()<nextAllowed)) return;
+    if (!trusted(location.href) || wasLoggedOut || wasChallenge || busy || Date.now()<rateLimitUntil || (!force && Date.now()<nextAllowed)) return;
     if(force)failures=0;
     busy=true;lastCode='syncing';
     const epoch=sessionEpoch;
@@ -387,20 +388,22 @@
     snapshot(force=false, showAvatar=true) {
       const ready=contentReady(root);
       const allowed=trusted(location.href);
-      let loggedOut=false;
+      let loggedOut=false,authenticationPending=false;
       if (allowed) {
-        loggedOut=/\/(?:login|signin|sign-in)(?:\/|$)/i.test(location.pathname)
-          || Array.from(document.querySelectorAll('input[type="' + String.fromCharCode(112,97,115,115,119,111,114,100) + '"]')).some(el=>visible(root,el));
+        loggedOut=/\/(?:login|signin|sign-in)(?:\/|$)/i.test(location.pathname);
+        authenticationPending=!loggedOut && Array.from(document.querySelectorAll('input[type="' + String.fromCharCode(112,97,115,115,119,111,114,100) + '"]')).some(el=>visible(root,el));
+        if(authenticationPending && !wasChallenge){sessionEpoch++;requestSerial++;activeController?.abort();activeController=null;busy=false;nextAllowed=Infinity;stopAvatarRecording(true);}
         if (loggedOut && !wasLoggedOut) { sessionEpoch++;requestSerial++;activeController?.abort();activeController=null;busy=false;quota=cardPlan=cardExtra=null;avatar=null;invite=null;stopAvatarRecording(true);lastCode='logged_out'; }
-        if (!loggedOut && wasLoggedOut) { nextAllowed=rateLimitUntil=failures=0; }
+        if (!loggedOut && !authenticationPending && (wasLoggedOut || wasChallenge)) { nextAllowed=rateLimitUntil=failures=0; }
         wasLoggedOut=loggedOut;
+        wasChallenge=authenticationPending;
         if(force && showAvatar)stopAvatarRecording(true);
-        if (!loggedOut && ready) void refresh(force);
-        if(showAvatar && !loggedOut && ready && (!avatar || force || Date.now()-avatarChecked>30000)){
+        if (!loggedOut && !authenticationPending && ready) void refresh(force);
+        if(showAvatar && !loggedOut && !authenticationPending && ready && (!avatar || force || Date.now()-avatarChecked>30000)){
           avatarChecked=Date.now();avatar=captureAvatar(root) || avatar;
         }
-        if(showAvatar && !loggedOut && ready)recordAvatar();
-        if(!loggedOut && ready && Date.now()-inviteChecked>1000){
+        if(showAvatar && !loggedOut && !authenticationPending && ready)recordAvatar();
+        if(!loggedOut && !authenticationPending && ready && Date.now()-inviteChecked>1000){
           inviteChecked=Date.now();
           try{const found=parseInvite(root);if(found)invite={...found,observed_at:Date.now()};}catch{}
         }
@@ -417,7 +420,7 @@
         invite:allowed && !loggedOut ? invite : null,
         invite_status:allowed && !loggedOut?(invite?'passive_observed':'no_proven_reader'):'unavailable',
         retry_after_ms:Number.isFinite(nextAllowed)?Math.max(0,nextAllowed-Date.now()):null,
-        quota_status:!allowed ? 'unsupported' : loggedOut ? 'logged_out' : lastCode,
+        quota_status:!allowed ? 'unsupported' : loggedOut ? 'logged_out' : authenticationPending ? 'authentication_pending' : lastCode,
         action_found:!!action,scripts_scanned:scanned,
         preload_found:preload !== null,settings_loaded:settingsLoaded,
         style_waiting:Array.from(document.querySelectorAll('link[rel~="stylesheet"]')).filter(l=>!l.disabled && l.sheet===null).length,

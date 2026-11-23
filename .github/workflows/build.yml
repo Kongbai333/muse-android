@@ -80,6 +80,8 @@ jobs:
         run: |
           node --test checks/check-observer.cjs
           node --test checks/check-card-refresh-integration.cjs
+          node --test checks/check-app-update-integration.cjs
+          node checks/check-app-update-ui.cjs
           node --test checks/check-account-transfer-integration.cjs
           node checks/check-account-transfer-store.cjs
           node checks/check-account-transfer-json.cjs

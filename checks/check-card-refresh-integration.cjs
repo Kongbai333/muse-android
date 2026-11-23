@@ -11,6 +11,8 @@ test('card native probes serialize evaluation and cancel stale owners',()=>{
 });
 test('card current account pulse has foreground, generation and route gates',()=>{
  const s=read('MainActivity.java');for(const marker of ['quotaPulse','onResume()','onPause()','browser.transferring()','loginReady(','quotaHandler.removeCallbacks(quotaPulse)'])assert.ok(s.includes(marker),marker);
+ assert.ok(s.includes('quotas.loginRequired(account.id)'),'explicit foreground login route invalidates the old profile reading');
+ assert.ok(read('QuotaSync.java').includes('authentication_pending'),'a challenge cannot be labeled quota success');
  const proxy=s.slice(s.indexOf('private void proxyChanged('),s.indexOf('/** 检测各账号的代理出口'));
  assert.ok(proxy.includes('quotas.cancel()'),'proxy revision invalidates old probe');
 });

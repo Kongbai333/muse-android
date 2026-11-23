@@ -350,5 +350,6 @@ final class AccountTransferUi {
         default->"账号包读写失败，未确认完成；请检查所选文件和存储位置。";
     };}
 
+    boolean busy(){return operation!=null||!dialogs.isEmpty();}
     void close(){closed=true;if(operation!=null)cancel(operation);for(AlertDialog dialog:new ArrayList<>(dialogs))dialog.dismiss();dialogs.clear();io.shutdownNow();}
 }

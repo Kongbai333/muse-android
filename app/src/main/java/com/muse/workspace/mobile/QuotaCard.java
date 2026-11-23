@@ -66,9 +66,10 @@ final class QuotaCard {
         String day = data == null ? "" : data.resetLabel(now);
         reset.setText(!day.isEmpty() ? day : current && used == null ? "无需重置" : "");
         long extraAt = Math.max(card.observed("extra_remaining"), card.observed("extra_display"));
-        invite.setText(card.extraText().isEmpty() ? "待同步" : (old(extraAt, now) ? "上次 " : "") + card.extraText());
-        code.setText(card.inviteCode().isEmpty() ? "邀请码 · 待页面提供" : (old(card.observed("invite_code"), now) ? "上次邀请码 · " : "邀请码 · ") + card.inviteCode());
-        String count = card.inviteRemaining() == null ? "次数 · 待页面提供" : (old(card.observed("invite_remaining"), now) ? "上次 " : "") + "还可使用 " + card.inviteRemaining() + " 次";
+        long usageAt = data == null ? 0 : data.observed();
+        invite.setText(card.extraText().isEmpty() ? "待同步" : (old(extraAt, now) || extraAt < usageAt ? "上次 " : "") + card.extraText());
+        code.setText(card.inviteCode().isEmpty() ? "邀请码 · 待页面提供" : (old(card.observed("invite_code"), now) || card.observed("invite_code") < usageAt ? "上次邀请码 · " : "邀请码 · ") + card.inviteCode());
+        String count = card.inviteRemaining() == null ? "次数 · 待页面提供" : (old(card.observed("invite_remaining"), now) || card.observed("invite_remaining") < usageAt ? "上次 " : "") + "还可使用 " + card.inviteRemaining() + " 次";
         if (card.inviteRedeemed() != null) count += " · " + card.inviteRedeemed() + " 位好友已兑现";
         if (!card.inviteEarned().isEmpty()) count += " · 已赚取 " + card.inviteEarned();
         uses.setText(count);

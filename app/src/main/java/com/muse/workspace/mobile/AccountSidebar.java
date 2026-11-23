@@ -38,6 +38,7 @@ final class AccountSidebar extends FrameLayout {
         void selectStudioSession(StudioSession session);
         void deleteStudioSessions(List<StudioSession> sessions);
         void toggleTheme();
+        void checkForUpdates();
     }
 
     private final MobileUi ui;
@@ -424,6 +425,7 @@ final class AccountSidebar extends FrameLayout {
         navigation.addView(navRow(R.drawable.ic_route, "代理设置", proxyCount == 0 ? "" : proxyCount + " 条",
             proxyActive, host::openProxyManager));
         navigation.addView(navRow(R.drawable.ic_theme, "外观", NIGHT ? "暗房" : "白昼", false, host::toggleTheme));
+        navigation.addView(navRow(R.drawable.ic_web_refresh, "检查更新", "", false, host::checkForUpdates));
     }
 
     private View deleteAction() {

@@ -63,7 +63,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private QuotaSync quotas;
     private final Handler quotaHandler = new Handler(Looper.getMainLooper());
     private boolean foreground;
-    private String loginPageOwner = "";
+    private final java.util.HashSet<String> loginPageOwners = new java.util.HashSet<>();
     private final Runnable quotaPulse = new Runnable() {
         @Override public void run() {
             if (!foreground || !ready || closing) return;
@@ -75,6 +75,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private StudioResults studioResults;
     private boolean multiProfile;
     private AccountTransferUi transferUi;
+    private AppUpdateUi updater;
     private FrameLayout root, body, webFrame;
     private LinearLayout main;
     private AccountSidebar sidebar;
@@ -173,6 +174,22 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             }
             @Override public void beforeTransfer() { syncStudioDraft(); quotas.cancel(); clearFile(); }
             @Override public void imported() { importedAccounts(); }
+            @Override public void notice(String text) { message(text); }
+        });
+        updater = new AppUpdateUi(this, new AppUpdateUi.Host() {
+            @Override public boolean canOffer() {
+                return foreground && ready && !closing && !isFinishing() && !isDestroyed()
+                    && studio.running() == null && !browser.checking() && !browser.transferring() && !transferUi.busy();
+            }
+            @Override public boolean beforeInstall() {
+                if (!canOffer()) { message("请先完成或停止当前任务，再准备安装更新。"); return false; }
+                draftHandler.removeCallbacks(persistComposerHeight);
+                persistComposerHeight.run();
+                syncStudioDraft();
+                studio.flushSessions();
+                quotas.cancel();
+                return true;
+            }
             @Override public void notice(String text) { message(text); }
         });
         if (state != null) {
@@ -1616,6 +1633,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
                 .setTitle("移除「" + account.name + "」？").setMessage("账号将从列表中移除。此操作不会清除旧浏览器配置。")
                 .setNegativeButton("取消", null).setPositiveButton("移除", (confirm, button) -> {
                     boolean resetBrowser = account == current();
+                    loginPageOwners.remove(account.id);
                     accounts.remove(account);
                     browser.forget(account.id);
                     quotas.remove(account.id);
@@ -1645,6 +1663,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override public void exportAccounts() { if (transferUi != null) transferUi.exportAccounts(); }
     @Override public void importAccounts() { if (transferUi != null) transferUi.importAccounts(); }
     @Override public void importCookieText() { if (transferUi != null) transferUi.importCookieText(); }
+    @Override public void checkForUpdates() { if (updater != null) updater.check(true); }
 
     private void importedAccounts() {
         // Imported candidates are already committed; no automatic quota worker runs before this point.
@@ -1899,17 +1918,18 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     @Override public void browserChanged() {
-        if (screen != WEB || webFrame == null) return;
+        if (closing) return;
         AccountStore.Account account = current();
         String url = browser.url();
-        if (account != null && url != null && browser.isOpen(account.id)) {
-            if (StudioDraft.loginPage(url)) loginPageOwner = account.id;
-            else if (loginPageOwner.equals(account.id) && StudioDraft.trustedUrl(url) && !browser.loading()) {
-                loginPageOwner = "";
+        if (account != null && url != null && browser.isOpen(account.id) && StudioDraft.trustedUrl(url)) {
+            if (browser.consumeLoginRequired()) { loginPageOwners.add(account.id); quotas.loginRequired(account.id); }
+            else if (loginPageOwners.contains(account.id) && !StudioDraft.loginPage(url) && browser.pageReady()) {
+                loginPageOwners.remove(account.id);
                 quotas.loginReady(account.id);
                 syncCurrentQuota();
             }
         }
+        if (screen != WEB || webFrame == null) return;
         String host = url == null ? null : Uri.parse(url).getHost();
         ProxyProfile routeProfile = account == null ? null : proxies.find(account.proxyId());
         String route = browser.usingProxy() ? " · " + (routeProfile == null ? "代理" : routeProfile.name) : "";
@@ -1967,6 +1987,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (!ready) return;
+        if (updater != null && updater.onActivityResult(request, result, data)) return;
         if (transferUi != null && transferUi.onActivityResult(request, result, data)) return;
         if (request == SAVE_MEDIA) {
             File source = exporting == null ? null : studio.media(exporting);
@@ -2101,10 +2122,12 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         foreground = true;
         quotaHandler.removeCallbacks(quotaPulse);
         quotaPulse.run();
+        if (updater != null) updater.resume();
     }
 
     @Override protected void onPause() {
         foreground = false;
+        if (updater != null) updater.pause();
         quotaHandler.removeCallbacks(quotaPulse);
         if (quotas != null) quotas.cancel();
         super.onPause();
@@ -2124,6 +2147,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override protected void onDestroy() {
         if (!ready) { super.onDestroy(); return; }
         closing = true;
+        if (updater != null) updater.close();
         if (transferUi != null) transferUi.close();
         dismissAccountMenu();
         clearFile();

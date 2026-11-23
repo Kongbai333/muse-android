@@ -286,3 +286,24 @@ test('card: 403 retains the last subscription observation and has a distinct sta
   const after=context.__museDesktopObserver.snapshot(false,false);
   assert.equal(after.quota.used_percent,21);assert.equal(after.quota.observed_at,before.observed_at);assert.equal(after.quota_status,'forbidden');
 });
+test('card: a password challenge outside a login route keeps cached fields without calling it verified logout',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs');let challenge=false,requests=0;const id='e'.repeat(40);
+ const input={getBoundingClientRect:()=>({width:30,height:30})};
+ const context={URL,Headers,AbortController,TextDecoder,Uint8Array,setTimeout,clearTimeout,location:new URL('https://muse.ai/'),
+  document:{readyState:'complete',body:{innerText:'SYNTHETIC app',querySelectorAll:()=>[]},querySelectorAll:s=>s==='script[src]'?[{src:'https://muse.ai/_next/static/synthetic.js'}]:challenge&&s.startsWith('input[type=')?[input]:[]},
+  fetch:async url=>{if(String(url).endsWith('.js'))return new Response(`createServerReference("${id}",x,"fetchSubscriptionAction")`);requests++;return new Response(JSON.stringify(sample({state:'AVAILABLE',percentUsed:12})));},
+  getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};context.window=context;context.top=context;
+ vm.runInNewContext(fs.readFileSync(require.resolve('../app/src/main/assets/muse-observer.js'),'utf8'),withBrowserEvents(context));
+ context.__museDesktopObserver.snapshot(true,false);for(let i=0;i<8;i++)await new Promise(setImmediate);
+ challenge=true;const pending=context.__museDesktopObserver.snapshot(true,false);
+ assert.equal(pending.quota.used_percent,12);assert.equal(pending.quota_status,'authentication_pending');assert.equal(requests,1);
+ context.location=new URL('https://muse.ai/login');const logged=context.__museDesktopObserver.snapshot(false,false);assert.equal(logged.quota,null);assert.equal(logged.quota_status,'logged_out');
+});
+test('card: passive invitation parsing never reads password or hidden input values',()=>{
+ const body={},input={type:'password',get value(){throw Error('SYNTHETIC sensitive input must not be read');}};
+ const box={innerText:'邀请好友 还可使用 3 次',parentElement:body,getBoundingClientRect:()=>({width:160,height:80}),querySelectorAll:s=>s==='input'?[input]:[]};
+ const root={document:{body,evaluate:()=>({snapshotLength:1,snapshotItem:()=>box})},getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
+ for(const type of ['password','hidden','email','tel']){input.type=type;assert.equal(adapter.parseInvite(root),null);}
+ box.querySelectorAll=s=>s==='input'?[{type:'text',value:'SYNTH6'}]:[];
+ assert.equal(adapter.parseInvite(root).code,'SYNTH6','ordinary user-opened site dialog is still readable');
+});

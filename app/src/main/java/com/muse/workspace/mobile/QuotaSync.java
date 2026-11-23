@@ -74,14 +74,21 @@ final class QuotaSync {
             probe.page = browser.openWorker(account, profiles, StudioDraft.HOME, script,
                 reason -> end(probe, "未更新 · 网页未就绪"));
             main.postDelayed(() -> poll(probe), 350);
-        } catch (IOException error) {
+        } catch (IOException | RuntimeException error) {
             end(probe, "未更新 · 读取失败");
         }
     }
 
     private void poll(Probe probe) {
         if (active != probe) return;
-        if (probe.page.needsLogin()) { loggedOut(probe); return; }
+        if (probe.page.confirmedLoginRequired()) { loggedOut(probe); return; }
+        int http = probe.page.httpStatus();
+        if (http == 429) {
+            policy.finished(probe.account, "rate", QuotaRefreshPolicy.httpRetryAfter(probe.page.retryAfterHeader(), System.currentTimeMillis()), SystemClock.elapsedRealtime());
+            end(probe, "未更新 · 网站限流，请稍后重试"); return;
+        }
+        if (http == 403) { end(probe, "未更新 · 网站暂未允许读取"); return; }
+        if (http >= 400) { end(probe, "未更新 · 服务暂不可用"); return; }
         if (SystemClock.elapsedRealtime() - probe.started >= 27_000) { end(probe, probe.updated ? "部分已更新 · 额度待重试" : "未更新 · 可稍后重试"); return; }
         if (probe.page != null && probe.page.ready() && !probe.evaluating) {
             boolean force = probe.first;
@@ -122,6 +129,7 @@ final class QuotaSync {
             return;
         }
         if ("forbidden".equals(status)) { end(probe, "未更新 · 网站暂未允许读取"); return; }
+        if ("authentication_pending".equals(status)) { end(probe, "未更新 · 页面需要验证"); return; }
         if (("not_found".equals(status) || "request_failed".equals(status) || "unrecognized".equals(status) || "partial".equals(status))
                 && result.has("retry_after_ms") && result.isNull("retry_after_ms")) {
             end(probe, probe.updated ? "部分已更新 · 额度待重试" : "未更新 · 未取得有效数据"); return;
@@ -136,10 +144,18 @@ final class QuotaSync {
     }
 
     private void loggedOut(Probe probe) {
-        cache.edit().remove(probe.account).apply();
-        avatars.remove(probe.account);
-        policy.finished(probe.account, "auth", 0, SystemClock.elapsedRealtime());
-        end(probe, "请先登录");
+        if (active != probe) return;
+        loginRequired(probe.account);
+    }
+
+    void loginRequired(String account) {
+        if ("请先登录".equals(states.get(account)) && (active == null || !active.account.equals(account))) return;
+        if (active != null && active.account.equals(account)) end(active, "请先登录");
+        cache.edit().remove(account).apply();
+        avatars.remove(account);
+        policy.finished(account, "auth", 0, SystemClock.elapsedRealtime());
+        states.put(account, "请先登录");
+        changed.accept(account);
     }
 
     void loginReady(String account) {
