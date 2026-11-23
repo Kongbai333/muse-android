@@ -481,66 +481,87 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         return row;
     }
 
-    /** 快速切号菜单：贴在浮动头像旁边，显示头像、额度和当前账号。 */
+    private View quickAccountCell(AccountStore.Account account, boolean on, android.widget.PopupWindow popup, long now) {
+        boolean usable = accounts.usable(account, multiProfile);
+        boolean exhausted = exhausted(account);
+        boolean started = browser.isOpen(account.id) || browser.isParked(account.id);
+        boolean selectable = on || usable && !exhausted;
+        String lifecycle = browser.isParked(account.id) ? "后台保留" : started ? "已启动" : "未启动";
+        String detail = !usable ? "需更新 WebView" : exhausted && !on ? "额度已用完" : lifecycle;
+        LinearLayout cell = ui.column();
+        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        cell.setMinimumHeight(ui.dp(86));
+        cell.setPadding(ui.dp(4), ui.dp(8), ui.dp(4), ui.dp(8));
+        cell.setSelected(on);
+        FrameLayout face = new FrameLayout(this);
+        face.addView(ui.avatar(account.name, account.id, 30), new FrameLayout.LayoutParams(ui.dp(30), ui.dp(30)));
+        android.graphics.Bitmap photo = quotas.avatar(account.id);
+        if (photo != null) {
+            ImageView image = new ImageView(this);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setImageBitmap(photo);
+            image.setBackground(ui.shape(RAISED, 15, 0));
+            image.setClipToOutline(true);
+            face.addView(image, new FrameLayout.LayoutParams(ui.dp(30), ui.dp(30)));
+        }
+        if (on) face.addView(ui.iconView(R.drawable.ic_check, ACCENT, 14),
+            new FrameLayout.LayoutParams(ui.dp(14), ui.dp(14), Gravity.END | Gravity.BOTTOM));
+        face.setAlpha(!selectable ? 0.4f : started ? 1f : 0.5f);
+        cell.addView(face, new LinearLayout.LayoutParams(ui.dp(30), ui.dp(30)));
+        TextView name = ui.single(ui.text(account.name, 12.5f, INK, true));
+        name.setMinWidth(0);
+        name.setGravity(Gravity.CENTER);
+        name.setAlpha(!selectable ? 0.4f : started ? 1f : 0.5f);
+        ui.block(cell, name, 5);
+        TextView status = ui.single(ui.text(detail, 10.5f, TEXT2, false));
+        status.setMinWidth(0);
+        status.setGravity(Gravity.CENTER);
+        ui.block(cell, status, 2);
+        AccountQuota quota = quotas.value(account.id);
+        String description = account.name + "，" + lifecycle + (on ? "，当前账号" : "")
+            + (quota == null ? "" : "，" + quota.weekly(now)) + (selectable ? "" : "，" + detail + "，不可选");
+        cell.setContentDescription(description);
+        cell.setTooltipText(description);
+        cell.setEnabled(selectable);
+        if (selectable) ui.touch(cell, on ? RAISED : Color.TRANSPARENT, 12, 0, () -> {
+            popup.dismiss();
+            switchQuickAccount(account);
+        });
+        return cell;
+    }
+
+    /** 三列快速切号菜单，启动状态只读；只在用户点选后打开账号。 */
     private void showAccountMenu(List<AccountStore.Account> available) {
         dismissAccountMenu();
-        if (quickSwitch == null || root == null || root.getWindowToken() == null) return;
-        int width = ui.dp(252);
+        if (quickSwitch == null || root == null || root.getWindowToken() == null || root.getWidth() <= ui.dp(16)) return;
+        int width = Math.min(ui.dp(276), root.getWidth() - ui.dp(16));
         LinearLayout menu = ui.column();
         menu.setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8));
         TextView title = ui.text("快速切换账号", 12, TEXT2, false);
         title.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(8));
         menu.addView(title);
-        android.widget.PopupWindow popup = new android.widget.PopupWindow(menu, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        LinearLayout grid = ui.column();
+        menu.addView(grid, new LinearLayout.LayoutParams(-1, -2));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(menu, new ScrollView.LayoutParams(-1, -2));
+        android.widget.PopupWindow popup = new android.widget.PopupWindow(scroll, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
         AccountStore.Account selected = current();
         long now = System.currentTimeMillis();
-        for (AccountStore.Account account : available) {
-            boolean on = account == selected;
-            boolean usable = accounts.usable(account, multiProfile);
+        for (int start = 0; start < available.size(); start += 3) {
             LinearLayout row = ui.row();
-            row.setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8));
-            FrameLayout face = new FrameLayout(this);
-            face.addView(ui.avatar(account.name, account.id, 30), new FrameLayout.LayoutParams(ui.dp(30), ui.dp(30)));
-            android.graphics.Bitmap photo = quotas.avatar(account.id);
-            if (photo != null) {
-                ImageView image = new ImageView(this);
-                image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                image.setImageBitmap(photo);
-                image.setBackground(ui.shape(RAISED, 15, 0));
-                image.setClipToOutline(true);
-                face.addView(image, new FrameLayout.LayoutParams(ui.dp(30), ui.dp(30)));
+            row.setGravity(Gravity.TOP);
+            for (int column = 0; column < 3; column++) {
+                int index = start + column;
+                View cell = index < available.size() ? quickAccountCell(available.get(index), available.get(index) == selected, popup, now) : new View(this);
+                LinearLayout.LayoutParams position = new LinearLayout.LayoutParams(0, -2, 1);
+                if (column > 0) position.setMarginStart(ui.dp(6));
+                row.addView(cell, position);
             }
-            row.addView(face, new LinearLayout.LayoutParams(ui.dp(30), ui.dp(30)));
-            LinearLayout words = ui.column();
-            words.setPadding(ui.dp(10), 0, ui.dp(6), 0);
-            words.addView(ui.single(ui.text(account.name, 13.5f, INK, true)));
-            AccountQuota quota = quotas.value(account.id);
-            boolean exhausted = exhausted(account);
-            String detail = !usable ? "需更新 WebView 后可用" : quota == null ? quotas.state(account.id)
-                : exhausted ? "额度已用完" : quota.weekly(now);
-            if (usable && !on && browser.isParked(account.id)) detail += " · 后台保留中";
-            TextView sub = ui.single(ui.text(detail, 11.5f, TEXT2, false));
-            LinearLayout.LayoutParams subPosition = new LinearLayout.LayoutParams(-1, -2);
-            subPosition.topMargin = ui.dp(4);
-            words.addView(sub, subPosition);
-            row.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
-            if (on) row.addView(ui.iconView(R.drawable.ic_check, ACCENT, 17));
-            row.setContentDescription(account.name + "，" + detail + (on ? "，当前账号" : "") + (exhausted && !on ? "，不可选" : ""));
-            if ((exhausted || !usable) && !on) {
-                // 额度用完：保留在列表里但置灰，不能点。
-                row.setAlpha(0.4f);
-                row.setEnabled(false);
-            } else {
-                ui.touch(row, on ? RAISED : Color.TRANSPARENT, 12, 0, () -> {
-                    popup.dismiss();
-                    switchQuickAccount(account);
-                });
-            }
-            LinearLayout.LayoutParams rowPosition = new LinearLayout.LayoutParams(-1, -2);
-            rowPosition.topMargin = ui.dp(2);
-            menu.addView(row, rowPosition);
+            ui.block(grid, row, start == 0 ? 0 : 6);
         }
-        // 底部：添加账号 / 管理账号。
+        // 只保留原添加入口；账号管理仍在侧栏。
         View divider = new View(this);
         divider.setBackgroundColor(LINE);
         LinearLayout.LayoutParams dividerPosition = new LinearLayout.LayoutParams(-1, ui.dp(1));
@@ -550,19 +571,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             popup.dismiss();
             editAccount(null);
         }));
-        menu.addView(menuAction(R.drawable.ic_edit, "管理账号与额度", () -> {
-            popup.dismiss();
-            openSidebar();
-            sidebar.showSessions(false);
-        }));
-        if (multiProfile && all(available) > 1) {
-            TextView keep = ui.text("后台保留 " + browser.parkedCount() + " / " + browser.parkCapacity()
-                + " 个网页 · 同一网络的账号切换不重新加载", 11, MUTED, false);
-            keep.setPadding(ui.dp(10), ui.dp(4), ui.dp(10), ui.dp(6));
-            menu.addView(keep);
-        }
         if (!multiProfile) {
-            TextView note = ui.text("当前 WebView 不支持多账号，更新 Android System WebView 后可添加。", 11.5f, MUTED, false);
+            TextView note = ui.text("WebView 不支持多账号", 11.5f, MUTED, false);
             note.setPadding(ui.dp(10), ui.dp(4), ui.dp(10), ui.dp(6));
             menu.addView(note);
         }
@@ -573,9 +583,11 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             if (accountMenu == popup) accountMenu = null;
             retuckQuickSwitch();
         });
-        menu.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-        int height = menu.getMeasuredHeight();
+        int maxHeight = Math.max(1, root.getHeight() - topInset - root.getPaddingBottom() - ui.dp(20));
+        scroll.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST));
+        int height = scroll.getMeasuredHeight();
+        popup.setHeight(height);
         int[] origin = new int[2];
         root.getLocationInWindow(origin);
         int size = ui.dp(SWITCH_SIZE);
@@ -604,7 +616,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             sidebar.showSessions(false);
             return;
         }
-        // 只要有账号就弹出切号菜单；不能用的账号置灰并说明原因，底部可添加或管理账号。
+        // 只读启动状态；未启动灰显但仍可点选，真正不可用的账号保留保护。
         showAccountMenu(new java.util.ArrayList<>(all));
     }
 
@@ -1721,9 +1733,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             @Override public void remove(ProxyProfile profile) { removeProxy(profile); }
             @Override public void check() { runProxyCheck(); }
             @Override public String routing() {
-                if (!multiProfile) return "当前 WebView 不支持多账号。";
-                if (!browser.hubAllowed()) return "上次检测发现串号风险，已改为：切换到不同代理的账号时重新加载。点“检测出口”可重新检测。";
-                return "不同代理的账号也可同时在线（本机分流）。建议点“检测出口”确认每个账号只走自己的代理。";
+                if (!multiProfile) return "WebView 不支持多账号";
+                if (!browser.hubAllowed()) return "串号风险：跨代理切换将重新加载，请重新检测";
+                return "本机分流";
             }
         }), new ScrollView.LayoutParams(-1, -2));
         page.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));

@@ -15,7 +15,7 @@ final class ProxyManagerPage extends LinearLayout {
         void edit(ProxyProfile profile);
         void remove(ProxyProfile profile);
         void check();
-        /** 当前的多账号网络方式说明。 */
+        /** 当前网络方式短状态；实际风险和不支持原因必须保留。 */
         String routing();
     }
 
@@ -30,7 +30,6 @@ final class ProxyManagerPage extends LinearLayout {
             LinearLayout empty = ui.column();
             empty.setPadding(ui.dp(4), ui.dp(56), ui.dp(4), 0);
             empty.addView(ui.text("还没有代理配置", 22, INK, true));
-            ui.block(empty, ui.text("新增一条 HTTP、HTTPS 或 SOCKS5 代理，再到账号的编辑页里选择它。", 13.5f, TEXT2, false), 10);
             TextView add = ui.primary("新增代理", () -> host.edit(null));
             LinearLayout.LayoutParams addPosition = new LinearLayout.LayoutParams(-2, ui.dp(46));
             addPosition.topMargin = ui.dp(20);
@@ -39,24 +38,14 @@ final class ProxyManagerPage extends LinearLayout {
             return;
         }
 
-        TextView hint = ui.text("一条配置可以被多个账号共用。修改后，使用它的账号会在下次打开网页时生效；"
-            + "还有账号引用的配置，要先在账号里解除关联才能删除。", 13, TEXT2, false);
-        hint.setLineSpacing(ui.dp(5), 1f);
-        hint.setPadding(ui.dp(2), 0, ui.dp(2), ui.dp(6));
-        ui.block(this, hint, 0);
-
         // 分流状态 + 出口检测入口。
         LinearLayout routing = ui.row();
         routing.setPadding(ui.dp(14), ui.dp(12), ui.dp(10), ui.dp(12));
         routing.setBackground(ui.shape(RAISED, 16, 0));
-        LinearLayout words = ui.column();
-        words.addView(ui.text("多账号同时在线", 14, INK, true));
         TextView state = ui.text(host.routing(), 12, TEXT2, false);
         state.setLineSpacing(ui.dp(3), 1f);
-        LinearLayout.LayoutParams statePosition = new LinearLayout.LayoutParams(-1, -2);
-        statePosition.topMargin = ui.dp(5);
-        words.addView(state, statePosition);
-        routing.addView(words, new LayoutParams(0, -2, 1));
+        state.setTooltipText(state.getText());
+        routing.addView(state, new LayoutParams(0, -2, 1));
         TextView check = ui.small("检测出口", 0, false, host::check);
         LayoutParams checkPosition = new LayoutParams(-2, ui.dp(34));
         checkPosition.setMarginStart(ui.dp(10));

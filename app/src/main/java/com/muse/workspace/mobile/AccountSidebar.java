@@ -335,18 +335,16 @@ final class AccountSidebar extends FrameLayout {
 
     private View sessionRow(StudioSession session, boolean selected, boolean running) {
         FrameLayout frame = new FrameLayout(getContext());
-        // 纯文字的紧凑行：标题 + 账号 · 类型，不再显示图标方块。
+        // 仅显示单行标题；账号/类型留在完整无障碍说明里。
         LinearLayout row = ui.row();
         row.setMinimumHeight(ui.dp(48));
         row.setPadding(ui.dp(14), ui.dp(7), ui.dp(12), ui.dp(7));
-        LinearLayout words = ui.column();
-        words.setPadding(0, 0, ui.dp(6), 0);
-        words.addView(ui.single(ui.text(session.name, 14, INK, selected)));
-        TextView sub = ui.single(ui.text(session.ownerName + (session.video ? " · 视频" : " · 图片"), 11.5f, TEXT2, false));
-        LinearLayout.LayoutParams subPosition = new LinearLayout.LayoutParams(-1, -2);
-        subPosition.topMargin = ui.dp(2);
-        words.addView(sub, subPosition);
-        row.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView title = ui.single(ui.text(session.name, 14, INK, selected));
+        title.setMinWidth(0);
+        title.setTooltipText(session.name);
+        LinearLayout.LayoutParams titlePosition = new LinearLayout.LayoutParams(0, -2, 1);
+        titlePosition.setMarginEnd(ui.dp(6));
+        row.addView(title, titlePosition);
         if (running) row.addView(ui.text("生成中", 11, ACCENT, true));
         boolean checked = picking && picked.contains(session.id);
         if (picking && !running) row.addView(checkMark(checked), new LinearLayout.LayoutParams(ui.dp(20), ui.dp(20)));
@@ -362,7 +360,7 @@ final class AccountSidebar extends FrameLayout {
                 return true;
             });
         }
-        row.setContentDescription(session.name + "，" + session.ownerName + (selected ? "，当前会话" : "")
+        row.setContentDescription(session.name + "，" + session.ownerName + (session.video ? "，视频" : "，图片") + (selected ? "，当前会话" : "")
             + (running ? "，生成中" : "") + (picking ? (running ? "，生成中不能删除" : checked ? "，已选中" : "，未选中")
                 : "，长按可多选删除"));
         frame.addView(row, new FrameLayout.LayoutParams(-1, -2));
@@ -414,18 +412,51 @@ final class AccountSidebar extends FrameLayout {
             : ui.note("更新 Android System WebView 或 Chrome 后可添加多个账号。", 0);
         footer.addView(action, new LinearLayout.LayoutParams(-1, -2));
         if (!sessionsShown && !picking) {
-            footer.addView(ui.outline("导出账号与代理…", host::exportAccounts), new LinearLayout.LayoutParams(-1, -2));
-            footer.addView(ui.outline("导入账号包…", host::importAccounts), new LinearLayout.LayoutParams(-1, -2));
-            footer.addView(ui.outline("导入 Cookie 文本…", host::importCookieText), new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout transfers = ui.row();
+            TextView importButton = ui.single(ui.outline("导入…", this::showImportChoices));
+            importButton.setMinWidth(0);
+            importButton.setContentDescription("导入账号，选择加密账号包或Cookie文本");
+            importButton.setTooltipText("导入账号");
+            transfers.addView(importButton, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView exportButton = ui.single(ui.outline("导出…", host::exportAccounts));
+            exportButton.setMinWidth(0);
+            exportButton.setContentDescription("导出账号与代理");
+            exportButton.setTooltipText("导出账号与代理");
+            LinearLayout.LayoutParams exportPosition = new LinearLayout.LayoutParams(0, -2, 1);
+            exportPosition.setMarginStart(ui.dp(8));
+            transfers.addView(exportButton, exportPosition);
+            ui.block(footer, transfers, 8);
         }
 
         navigation.removeAllViews();
         navigation.addView(navRow(R.drawable.ic_studio, "工作室", "", studioActive, host::openStudio));
         int proxyCount = proxies.all().size();
-        navigation.addView(navRow(R.drawable.ic_route, "代理设置", proxyCount == 0 ? "" : proxyCount + " 条",
+        LinearLayout settings = ui.row();
+        settings.addView(settingsIcon(R.drawable.ic_route, "代理设置", proxyCount == 0 ? "未配置代理" : proxyCount + " 条",
             proxyActive, host::openProxyManager));
-        navigation.addView(navRow(R.drawable.ic_theme, "外观", NIGHT ? "暗房" : "白昼", false, host::toggleTheme));
-        navigation.addView(navRow(R.drawable.ic_web_refresh, "检查更新", "", false, host::checkForUpdates));
+        settings.addView(settingsIcon(R.drawable.ic_theme, "外观", NIGHT ? "暗房" : "白昼", false, host::toggleTheme));
+        settings.addView(settingsIcon(R.drawable.ic_web_refresh, "检查更新", "", false, host::checkForUpdates));
+        ui.block(navigation, settings, 4);
+    }
+
+    private void showImportChoices() {
+        MobileUi.dialog(getContext()).setTitle("导入账号")
+            .setItems(new String[]{"加密账号包", "Cookie文本"}, (dialog, index) -> {
+                dialog.dismiss();
+                if (index == 0) host.importAccounts();
+                else if (index == 1) host.importCookieText();
+            })
+            .setNegativeButton("取消", null).show();
+    }
+
+    private View settingsIcon(int icon, String label, String value, boolean active, Runnable action) {
+        String description = label + (value.isEmpty() ? "" : "，" + value) + (active ? "，已选中" : "");
+        View button = ui.iconButton(icon, description, active ? ACCENT : TEXT2, action);
+        button.setSelected(active);
+        button.setMinimumWidth(ui.dp(48));
+        button.setBackground(ui.touchable(active ? ACCENT_SOFT : Color.TRANSPARENT, 12, 0));
+        button.setLayoutParams(new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+        return button;
     }
 
     private View deleteAction() {
