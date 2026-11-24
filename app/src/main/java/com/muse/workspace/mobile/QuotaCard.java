@@ -72,7 +72,8 @@ final class QuotaCard {
         String plan = card.plan().isEmpty() ? "待同步" : card.plan();
         planChanged.accept(plan);
         boolean current = data != null && data.currentWeek(now) && "额度已同步".equals(state);
-        String weekly = data == null ? state : !current && data.currentWeek(now) ? "上次 · " + data.weekly(now) : data.weekly(now);
+        String weekly = data == null ? state : data.weekly(now);
+        if (data != null && weekly.startsWith("上次 · ")) weekly = weekly.substring("上次 · ".length());
         Double used = data == null ? null : data.used();
         boolean exhausted = used != null && used >= 100;
         week.setText(current && exhausted ? "已用完" : weekly);
@@ -93,9 +94,12 @@ final class QuotaCard {
         extraLabel.setOnClickListener(ignored -> showLabelDetails("额外额度", extraDetails));
         inviteLabel.setText(inviteText);
         String code = card.inviteCode();
-        inviteLabel.setContentDescription(inviteText + (code.isEmpty() ? "，邀请码待获取" : "，点按复制完整邀请码") + "，长按查看剩余次数和成功时间");
+        inviteLabel.setContentDescription(inviteText + (code.isEmpty() ? card.inviteExhausted() ? "，暂无可复制的邀请码" : "，邀请码待获取" : "，点按复制完整邀请码") + "，长按查看剩余次数和成功时间");
         inviteLabel.setTooltipText(inviteDetails);
-        inviteLabel.setOnClickListener(ignored -> copyInviteCode(code));
+        inviteLabel.setOnClickListener(ignored -> {
+            if (code.isEmpty() && card.inviteExhausted()) showLabelDetails("邀请已满", inviteDetails);
+            else copyInviteCode(code);
+        });
         inviteLabel.setOnLongClickListener(ignored -> { showLabelDetails("邀请信息", inviteDetails); return true; });
         long at = data == null ? card.lastSuccess() : data.observed();
         String when = at <= 0 ? "" : " · 上次 " + new SimpleDateFormat("M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(at));

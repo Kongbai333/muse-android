@@ -489,7 +489,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         boolean started = browser.isOpen(account.id) || browser.isParked(account.id);
         boolean selectable = on || usable && !exhausted;
         String lifecycle = browser.isParked(account.id) ? "后台保留" : started ? "已启动" : "未启动";
-        String detail = !usable ? "需更新 WebView" : exhausted && !on ? "额度已用完" : lifecycle;
+        AccountQuota quota = quotas.value(account.id);
+        String detail = quota == null ? "周额度待获取" : quota.used() == null ? "周额度不限量" : "周额度" + Math.round(quota.used()) + "%";
+        String unavailable = !usable ? "需更新 WebView" : exhausted && !on ? "额度已用完" : "";
         LinearLayout cell = ui.column();
         cell.setGravity(Gravity.CENTER_HORIZONTAL);
         cell.setMinimumHeight(ui.dp(86));
@@ -519,9 +521,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         status.setMinWidth(0);
         status.setGravity(Gravity.CENTER);
         ui.block(cell, status, 2);
-        AccountQuota quota = quotas.value(account.id);
         String description = account.name + "，" + lifecycle + (on ? "，当前账号" : "")
-            + (quota == null ? "" : "，" + quota.weekly(now)) + (selectable ? "" : "，" + detail + "，不可选");
+            + "，" + detail + (quota == null ? "" : "，" + quota.weekly(now)) + (selectable ? "" : "，" + unavailable + "，不可选");
         cell.setContentDescription(description);
         cell.setTooltipText(description);
         cell.setEnabled(selectable);

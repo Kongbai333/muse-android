@@ -367,6 +367,7 @@ test('invite reader: zero and partial values retain independent old field times,
  p.observer.snapshot(false,false);await settleInvite();const first=p.observer.snapshot(false,false).invite;
  p.advance(300000);p.observer.snapshot(false,false);await settleInvite();const second=p.observer.snapshot(false,false).invite;
  assert.equal(second.code,'SYNTH6');assert.equal(second.code_observed_at,first.code_observed_at);
+ assert.equal(second.code_unavailable,true);assert.equal(second.code_unavailable_observed_at,p.clock());
  assert.equal(second.remaining,0);assert.equal(second.remaining_observed_at,p.clock());
  assert.equal(second.redeemed,undefined);assert.equal(second.earned,undefined);
 });
@@ -453,6 +454,9 @@ test('card polish: invitation parser forwards real nullable numerator/denominato
  assert.equal(zero.use_count,0);assert.equal(zero.max_uses,0);assert.equal(zero.remaining,undefined);assert.equal(zero.redeemed,undefined);
  const unknown=adapter.parseInviteModel(invitePayload({use_count:null,max_uses:null}));assert.equal(unknown.use_count,undefined);assert.equal(unknown.max_uses,undefined);
  assert.equal(adapter.parseInviteModel(invitePayload({use_count:31,max_uses:30})),null);
+ const missing=invitePayload({use_count:30,max_uses:30});delete missing.code;
+ assert.equal(adapter.parseInviteModel(missing,true).code_unavailable,true);
+ assert.equal(adapter.parseInviteModel({...missing,max_uses:null},true),null);
 });
 test('card polish: invitation counter times merge independently and a partial response never refreshes the old numerator',async()=>{
  const p=invitePage(n=>inviteResponse(invitePayload(n===1?{}:{code:null,use_count:null,max_uses:9,uses_remaining:null})));

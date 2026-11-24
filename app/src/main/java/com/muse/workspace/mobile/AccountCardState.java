@@ -52,6 +52,18 @@ final class AccountCardState {
             put(next,"invite_max_uses",invite.get("max_uses"),fieldTime(invite,"max_uses",at),now);
             put(next,"invite_redeemed",invite.get("redeemed"),fieldTime(invite,"redeemed",at),now);
             put(next,"invite_earned",invite.get("earned"),fieldTime(invite,"earned",at),now);
+            Long uses=integer(invite.get("use_count")),maximum=integer(invite.get("max_uses"));
+            long unavailableAt=fieldTime(invite,"code_unavailable",at);
+            Field count=next.get("invite_use_count"),limit=next.get("invite_max_uses");
+            if(Boolean.TRUE.equals(invite.get("code_unavailable"))&&uses!=null&&maximum!=null&&maximum>0&&uses.equals(maximum)
+                &&count!=null&&limit!=null&&count.observed==unavailableAt&&limit.observed==unavailableAt&&uses.equals(count.value)&&maximum.equals(limit.value))
+                put(next,"invite_code_unavailable",true,unavailableAt,now);
+            else if(Boolean.FALSE.equals(invite.get("code_unavailable"))){
+                Field code=next.get("invite_code");long restoredAt=fieldTime(invite,"code_unavailable",at);
+                String incoming=text(invite.get("code"),16);
+                if(code!=null&&code.observed==restoredAt&&incoming!=null&&code.value.equals(incoming.toUpperCase(Locale.ROOT)))
+                    put(next,"invite_code_unavailable",false,restoredAt,now);
+            }
         }
         return new AccountCardState(next);
     }
@@ -85,7 +97,11 @@ final class AccountCardState {
         if(remaining==null)return "";
         return "剩余 "+decimal(remaining)+(total!=null&&total>=remaining?" / "+decimal(total):"");
     }
-    String inviteCode(){Object value=value("invite_code");return value instanceof String?(String)value:"";}
+    String inviteCode(){
+        if(Boolean.TRUE.equals(value("invite_code_unavailable"))&&observed("invite_code_unavailable")>=observed("invite_code"))return "";
+        Object value=value("invite_code");return value instanceof String?(String)value:"";
+    }
+    boolean inviteExhausted(){Long used=inviteUseCount(),maximum=inviteMaxUses();return used!=null&&maximum!=null&&maximum>0&&used>=maximum;}
     Double extraRemaining(){return number(value("extra_remaining"));}
     Double extraTotal(){return number(value("extra_total"));}
     String extraDisplay(){Object value=value("extra_display");return value instanceof String?(String)value:"";}
@@ -111,6 +127,7 @@ final class AccountCardState {
             case "extra_display"->normalized=text(value,96);
             case "invite_code"->{String code=text(value,16);if(code!=null&&code.toUpperCase(Locale.ROOT).matches("[A-Z0-9]{6,16}"))normalized=code.toUpperCase(Locale.ROOT);}
             case "invite_remaining","invite_use_count","invite_max_uses","invite_redeemed"->normalized=integer(value);
+            case "invite_code_unavailable"->normalized=value instanceof Boolean?value:null;
             case "invite_earned"->normalized=text(value,96);
             default->{return;}
         }

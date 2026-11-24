@@ -5,13 +5,13 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -86,21 +86,6 @@ final class AccountSidebar extends FrameLayout {
         panel.setFocusableInTouchMode(true);
         ViewCompat.setAccessibilityPaneTitle(panel, "侧边栏");
         addView(panel, new LayoutParams(ui.dp(340), -1, Gravity.START));
-
-        LinearLayout heading = ui.row();
-        heading.setPadding(ui.dp(20), ui.dp(4), ui.dp(8), 0);
-        TextView name = ui.figure("Muse", 21, INK);
-        heading.addView(name, new LinearLayout.LayoutParams(-2, -2));
-        View mark = new View(context);
-        mark.setBackground(ui.shape(ACCENT, 2, 0));
-        LinearLayout.LayoutParams markPosition = new LinearLayout.LayoutParams(ui.dp(7), ui.dp(7));
-        markPosition.setMarginStart(ui.dp(4));
-        markPosition.gravity = Gravity.BOTTOM;
-        markPosition.bottomMargin = ui.dp(4);
-        heading.addView(mark, markPosition);
-        heading.addView(ui.spacer());
-        heading.addView(ui.compactIconButton(R.drawable.ic_close, "关闭侧边栏", INK, () -> close(true)));
-        ui.block(panel, heading, 0);
 
         tabs = ui.segment(new String[]{"会话", "账号"}, null, true, 0, index -> {
             sessionsShown = index == 0;
@@ -440,13 +425,24 @@ final class AccountSidebar extends FrameLayout {
 
     private View settingsIcon(int icon, String label, String value, boolean active, Runnable action) {
         String description = label + (value.isEmpty() ? "" : "，" + value) + (active ? "，已选中" : "");
-        ImageButton button = ui.iconButton(icon, description, active ? ACCENT : TEXT2, action);
-        button.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        ui.pad(button, 14, 14);
+        TextView button = ui.single(ui.text(label, 10.5f, active ? ACCENT : TEXT2, false));
+        button.setGravity(Gravity.CENTER);
+        Drawable image = getContext().getDrawable(icon);
+        if (image != null) {
+            image = image.mutate();
+            image.setTint(active ? ACCENT : TEXT2);
+            image.setBounds(0, 0, ui.dp(20), ui.dp(20));
+            button.setCompoundDrawablesRelative(null, image, null, null);
+            button.setCompoundDrawablePadding(ui.dp(4));
+        }
+        ui.pad(button, 4, 6);
         button.setSelected(active);
         button.setMinimumWidth(ui.dp(48));
-        button.setBackground(ui.touchable(active ? ACCENT_SOFT : Color.TRANSPARENT, 12, 0));
-        button.setLayoutParams(new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+        button.setMinimumHeight(ui.dp(56));
+        button.setContentDescription(description);
+        button.setTooltipText(description);
+        ui.touch(button, active ? ACCENT_SOFT : Color.TRANSPARENT, 12, 0, action);
+        button.setLayoutParams(new LinearLayout.LayoutParams(0, ui.dp(56), 1));
         return button;
     }
 

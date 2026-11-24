@@ -27,19 +27,20 @@ public final class AccountCardStateCheck {
         AccountCardState partial=invite.merge(map("invite",map("remaining",3L,"observed_at",NOW+600003)),NOW+600003);
         require(partial.inviteCode().equals("SYNTH6")&&partial.observed("invite_code")==NOW+600002&&partial.inviteRemaining()==3L,"partial invite preserves code/time");
         AccountCardState jsPartial=partial.merge(map("invite",map("code","SYNTH6","code_observed_at",NOW+600002,
-            "remaining",0L,"remaining_observed_at",NOW+600004,"observed_at",NOW+600004)),NOW+600004);
+            "remaining",0L,"remaining_observed_at",NOW+600004,"use_count",30L,"max_uses",30L,"code_unavailable",true,
+            "code_unavailable_observed_at",NOW+600004,"observed_at",NOW+600004)),NOW+600004);
         require(jsPartial.inviteRemaining()==0L&&jsPartial.observed("invite_remaining")==NOW+600004,"reader zero has its own observation time");
-        require(jsPartial.observed("invite_code")==NOW+600002&&jsPartial.observed("usage")==NOW+600001,"retained JS code and quota do not acquire the new remaining time");
+        require(jsPartial.observed("invite_code")==NOW+600002&&jsPartial.observed("usage")==NOW+600001&&jsPartial.inviteCode().isEmpty(),"confirmed full missing-code receipt masks old code without rewriting its success time or quota");
         AccountCardState invalidTime=jsPartial.merge(map("invite",map("code","NEW777","code_observed_at",NOW+9999999,
-            "remaining",1L,"remaining_observed_at",null,"observed_at",NOW+600005)),NOW+600005);
-        require(invalidTime.inviteCode().equals("SYNTH6")&&invalidTime.inviteRemaining()==0L,"invalid explicit per-field times cannot fall back to a newer group time");
+            "remaining",1L,"remaining_observed_at",null,"code_unavailable",false,"observed_at",NOW+600005)),NOW+600005);
+        require(invalidTime.inviteCode().isEmpty()&&invalidTime.inviteRemaining()==0L&&AccountCardState.read(jsPartial.rows(),NOW+600005).inviteCode().isEmpty(),"invalid new code cannot revive unavailable code and persisted receipt retains original identity protection");
         AccountCardState unlimited=partial.merge(map("quota",map("state","unlimited","observed_at",NOW+600004)),NOW+600004);
         require(unlimited.quota(NOW+600004).used()==null&&unlimited.quota(NOW+600004).weekly(NOW+600004).contains("不限量"),"unlimited is valid even with stale reset metadata");
         AccountCardState old=unlimited.merge(map("quota",map("state","known","used_percent",99.,"observed_at",NOW)),NOW+600004);
         require(old.quota(NOW+600004).used()==null,"late older observation cannot overwrite new value");
         AccountCardState bad=old.merge(map("quota",map("state","known","used_percent",101.,"observed_at",NOW+600005)),NOW+600005);
         require(bad.lastSuccess()==old.lastSuccess(),"invalid percent does not create success");
-        bad=old.merge(map("invite",map("code","bad\ncode","remaining",-1L,"observed_at",NOW+600005)),NOW+600005);
+        bad=old.merge(map("invite",map("code","bad\ncode","remaining",-1L,"code_unavailable",true,"observed_at",NOW+600005)),NOW+600005);
         require(bad.lastSuccess()==old.lastSuccess(),"invalid invite fields do not create success");
         bad=old.merge(map("quota",map("state","known","used_percent",80.,"observed_at",NOW+9999999)),NOW+600005);
         require(bad.observed("usage")==old.observed("usage"),"future clock invalid observation ignored");

@@ -16,6 +16,7 @@ final class AccountCardLabels {
 
     static String invitation(AccountCardState card) {
         String code=card.inviteCode();
+        if(code.isEmpty()&&card.inviteExhausted())return "邀请已满"+count(card.inviteUseCount())+"/"+count(card.inviteMaxUses());
         return (code.isEmpty()?"待获取":code)+" "+count(card.inviteUseCount())+"/"+count(card.inviteMaxUses()==null?30L:card.inviteMaxUses());
     }
 
@@ -28,7 +29,8 @@ final class AccountCardLabels {
     }
 
     static String inviteDetails(AccountCardState card) {
-        return "邀请码："+(card.inviteCode().isEmpty()?"未知":card.inviteCode())+time(card.observed("invite_code"))
+        return "邀请码："+(card.inviteCode().isEmpty()?(card.inviteExhausted()?"已满，暂无可用邀请码":"未知"):card.inviteCode())+time(card.observed("invite_code"))
+            +(card.inviteCode().isEmpty()&&card.observed("invite_code_unavailable")>0?"\n最近确认不可用"+time(card.observed("invite_code_unavailable")):"")
             +"\n\n已使用次数："+count(card.inviteUseCount())+time(card.observed("invite_use_count"))
             +"\n\n次数上限："+(card.inviteMaxUses()==null?"默认30（未获取到真实上限）":count(card.inviteMaxUses())+time(card.observed("invite_max_uses")))
             +"\n\n剩余次数："+count(card.inviteRemaining())+time(card.observed("invite_remaining"))
@@ -48,7 +50,7 @@ final class AccountCardLabels {
     }
 
     static boolean cached(AccountCardState card,long now,long quotaObserved) {
-        for(String field:new String[]{"extra_remaining","extra_total","extra_display","invite_code","invite_remaining","invite_use_count","invite_max_uses","invite_redeemed","invite_earned"}) {
+        for(String field:new String[]{"extra_remaining","extra_total","extra_display","invite_code","invite_code_unavailable","invite_remaining","invite_use_count","invite_max_uses","invite_redeemed","invite_earned"}) {
             long at=card.observed(field);
             if(at>0 && (now-at>=300000 || at<quotaObserved))return true;
         }

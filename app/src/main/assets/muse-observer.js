@@ -87,12 +87,17 @@
     return match ? Number(match[1]) : null;
   }
   function parseInviteModel(node,allowEmpty=false){
-    if(!node || typeof node!=='object' || Array.isArray(node) || !('code' in node) || !('max_uses' in node) || !('use_count' in node))return null;
+    if(!node || typeof node!=='object' || Array.isArray(node) || !('max_uses' in node) || !('use_count' in node))return null;
     const integer=v=>v===null || v===undefined || Number.isSafeInteger(v) && v>=0;
     if(![node.max_uses,node.use_count,node.uses_remaining].every(integer))return null;
     if(node.max_uses>0 && node.use_count>node.max_uses)return null;
+    const full=Number.isSafeInteger(node.max_uses) && node.max_uses>0 && node.use_count===node.max_uses;
+    if(!('code' in node) && !(allowEmpty && full))return null;
     const out={};
-    if(node.code!==null && node.code!==undefined){if(typeof node.code!=='string' || !/^[A-Z0-9]{6,16}$/.test(node.code.trim().toUpperCase()))return null;out.code=node.code.trim().toUpperCase();}
+    const absent=node.code===null || node.code===undefined || typeof node.code==='string' && !node.code.trim();
+    if(!absent){if(typeof node.code!=='string' || !/^[A-Z0-9]{6,16}$/.test(node.code.trim().toUpperCase()))return null;out.code=node.code.trim().toUpperCase();}
+    else if(full)out.code_unavailable=true;
+    else if(typeof node.code==='string')return null;
     if(node.uses_remaining!==null && node.uses_remaining!==undefined)out.remaining=node.uses_remaining;
     if(node.use_count!==null && node.use_count!==undefined)out.use_count=node.use_count;
     if(node.max_uses!==null && node.max_uses!==undefined)out.max_uses=node.max_uses;
@@ -231,8 +236,10 @@
   let invite=null, inviteChecked=0;
   let inviteStatus='waiting',inviteBusy=false,inviteFailures=0,inviteNext=0,inviteRateUntil=0,inviteManualAfter=0;
   let inviteSerial=0,inviteController=null,inviteRoute=location.href;
-  function mergeInvite(found,at=Date.now()){
-    for(const key of ['code','remaining','use_count','max_uses','redeemed','earned'])if(found?.[key]!==null && found?.[key]!==undefined){
+  function mergeInvite(found,at=Date.now(),provenReader=false){
+    if(provenReader && found?.code && invite?.code_unavailable)found={...found,code_unavailable:false};
+    for(const key of ['code','code_unavailable','remaining','use_count','max_uses','redeemed','earned'])if(found?.[key]!==null && found?.[key]!==undefined){
+      if(key==='code' && invite?.code_unavailable && !provenReader)continue;
       if(!invite)invite={};invite[key]=found[key];invite[key+'_observed_at']=at;invite.observed_at=at;
     }
   }
@@ -274,7 +281,7 @@
         const text=await boundedText(response);if(!current())return;
         let parsed;try{parsed=parseInviteModel(JSON.parse(text),true);}catch{code='unrecognized';return;}
         if(parsed===null){code='unrecognized';return;}
-        mergeInvite(parsed);code='ok';
+        mergeInvite(parsed,Date.now(),true);code='ok';
       })()]);
     }catch{code='request_failed';}
     finally{
