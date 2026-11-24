@@ -490,7 +490,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         boolean selectable = on || usable && !exhausted;
         String lifecycle = browser.isParked(account.id) ? "后台保留" : started ? "已启动" : "未启动";
         AccountQuota quota = quotas.value(account.id);
-        String detail = quota == null ? "周额度待获取" : quota.used() == null ? "周额度不限量" : "周额度" + Math.round(quota.used()) + "%";
+        boolean oldPeriod = quota != null && quota.resets() > quota.observed() && quota.resets() <= now;
+        String detail = quota == null || oldPeriod ? "周额度待获取" : quota.used() == null ? "周额度不限量" : "周额度" + Math.round(quota.used()) + "%";
         String unavailable = !usable ? "需更新 WebView" : exhausted && !on ? "额度已用完" : "";
         LinearLayout cell = ui.column();
         cell.setGravity(Gravity.CENTER_HORIZONTAL);

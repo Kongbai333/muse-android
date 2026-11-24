@@ -30,10 +30,12 @@ public final class AccountCardStateCheck {
             "remaining",0L,"remaining_observed_at",NOW+600004,"use_count",30L,"max_uses",30L,"code_unavailable",true,
             "code_unavailable_observed_at",NOW+600004,"observed_at",NOW+600004)),NOW+600004);
         require(jsPartial.inviteRemaining()==0L&&jsPartial.observed("invite_remaining")==NOW+600004,"reader zero has its own observation time");
-        require(jsPartial.observed("invite_code")==NOW+600002&&jsPartial.observed("usage")==NOW+600001&&jsPartial.inviteCode().isEmpty(),"confirmed full missing-code receipt masks old code without rewriting its success time or quota");
-        AccountCardState invalidTime=jsPartial.merge(map("invite",map("code","NEW777","code_observed_at",NOW+9999999,
+        AccountCardState restarted=AccountCardState.read(jsPartial.rows(),NOW+600005).merge(map("invite",map("code","SYNTH6","observed_at",NOW+600005)),NOW+600005);
+        require(restarted.observed("invite_code")==NOW+600002&&restarted.observed("usage")==NOW+600001&&restarted.inviteCode().isEmpty(),"new observer passive code cannot revive persisted unavailable code or rewrite original time");
+        AccountCardState invalidTime=restarted.merge(map("invite",map("code","NEW777","code_observed_at",NOW+9999999,
             "remaining",1L,"remaining_observed_at",null,"code_unavailable",false,"observed_at",NOW+600005)),NOW+600005);
-        require(invalidTime.inviteCode().isEmpty()&&invalidTime.inviteRemaining()==0L&&AccountCardState.read(jsPartial.rows(),NOW+600005).inviteCode().isEmpty(),"invalid new code cannot revive unavailable code and persisted receipt retains original identity protection");
+        AccountCardState recovered=restarted.merge(map("invite",map("code","NEW777","code_unavailable",false,"observed_at",NOW+600006)),NOW+600006);
+        require(invalidTime.inviteCode().isEmpty()&&invalidTime.inviteRemaining()==0L&&recovered.inviteCode().equals("NEW777")&&recovered.observed("invite_code")==NOW+600006,"only explicit matching reader receipt restores unavailable code; invalid time cannot");
         AccountCardState unlimited=partial.merge(map("quota",map("state","unlimited","observed_at",NOW+600004)),NOW+600004);
         require(unlimited.quota(NOW+600004).used()==null&&unlimited.quota(NOW+600004).weekly(NOW+600004).contains("不限量"),"unlimited is valid even with stale reset metadata");
         AccountCardState old=unlimited.merge(map("quota",map("state","known","used_percent",99.,"observed_at",NOW)),NOW+600004);

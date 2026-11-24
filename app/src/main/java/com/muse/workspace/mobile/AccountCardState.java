@@ -46,7 +46,10 @@ final class AccountCardState {
         Map<String,Object> invite=object(reply.get("invite"));
         if(invite!=null){
             long at=time(invite,now);
-            put(next,"invite_code",invite.get("code"),fieldTime(invite,"code",at),now);
+            long codeAt=fieldTime(invite,"code",at),receiptAt=fieldTime(invite,"code_unavailable",at);
+            boolean readerRestore=Boolean.FALSE.equals(invite.get("code_unavailable"))&&codeAt==receiptAt&&receiptAt>observed("invite_code_unavailable");
+            if(!Boolean.TRUE.equals(value("invite_code_unavailable"))||readerRestore)
+                put(next,"invite_code",invite.get("code"),codeAt,now);
             put(next,"invite_remaining",invite.get("remaining"),fieldTime(invite,"remaining",at),now);
             put(next,"invite_use_count",invite.get("use_count"),fieldTime(invite,"use_count",at),now);
             put(next,"invite_max_uses",invite.get("max_uses"),fieldTime(invite,"max_uses",at),now);
@@ -98,7 +101,7 @@ final class AccountCardState {
         return "剩余 "+decimal(remaining)+(total!=null&&total>=remaining?" / "+decimal(total):"");
     }
     String inviteCode(){
-        if(Boolean.TRUE.equals(value("invite_code_unavailable"))&&observed("invite_code_unavailable")>=observed("invite_code"))return "";
+        if(Boolean.TRUE.equals(value("invite_code_unavailable")))return "";
         Object value=value("invite_code");return value instanceof String?(String)value:"";
     }
     boolean inviteExhausted(){Long used=inviteUseCount(),maximum=inviteMaxUses();return used!=null&&maximum!=null&&maximum>0&&used>=maximum;}

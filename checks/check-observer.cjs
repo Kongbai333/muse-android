@@ -353,6 +353,7 @@ test('invite reader: ready snapshot automatically GETs without an open panel, PO
  assert.equal(options.method,'GET');assert.equal(options.credentials,'same-origin');assert.equal(options.cache,'no-store');assert.equal(options.redirect,'error');
  assert.equal('body' in options,false);assert.equal(new Headers(options.headers).get('Cookie'),null);
  const result=p.observer.snapshot(false,false);assert.equal(result.invite.code,'SYNTH6');assert.equal(result.invite.remaining,4);assert.equal(result.invite_status,'ok');assert.equal(p.clicks(),0);
+ assert.equal(result.invite.code_unavailable,false);assert.equal(result.invite.code_unavailable_observed_at,p.clock());
  assert.equal(result.invite.redeemed,undefined);assert.equal(result.invite.earned,undefined);
 });
 test('invite reader: single flight and success interval are independent of forced quota refresh',async()=>{

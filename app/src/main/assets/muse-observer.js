@@ -237,7 +237,7 @@
   let inviteStatus='waiting',inviteBusy=false,inviteFailures=0,inviteNext=0,inviteRateUntil=0,inviteManualAfter=0;
   let inviteSerial=0,inviteController=null,inviteRoute=location.href;
   function mergeInvite(found,at=Date.now(),provenReader=false){
-    if(provenReader && found?.code && invite?.code_unavailable)found={...found,code_unavailable:false};
+    if(provenReader && found?.code)found={...found,code_unavailable:false};
     for(const key of ['code','code_unavailable','remaining','use_count','max_uses','redeemed','earned'])if(found?.[key]!==null && found?.[key]!==undefined){
       if(key==='code' && invite?.code_unavailable && !provenReader)continue;
       if(!invite)invite={};invite[key]=found[key];invite[key+'_observed_at']=at;invite.observed_at=at;
