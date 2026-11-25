@@ -86,7 +86,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private android.widget.PopupWindow accountMenu;
     private boolean switchTucked, switchPeeking, switchRight = true, switchLongPressed;
     private float switchY = 0.3f;
-    private TextView webTitle, webSubtitle, webNotice, studioTitle, studioSubtitle;
+    private TextView webTitle, webSubtitle, webNotice, studioTitle;
     private LinearLayout studioAccount;
     private ImageButton sidebarToggle, webBack, submitButton;
     private MobileUi.Segment studioMode;
@@ -828,7 +828,6 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         studioResults = null;
         studioScroll = null;
         studioTitle = null;
-        studioSubtitle = null;
         studioMode = null;
         studioComposer = null;
         studioAccountValue = null;
@@ -848,25 +847,20 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         updateQuickSwitchFace();
     }
 
-    private LinearLayout.LayoutParams webIconSize() { return new LinearLayout.LayoutParams(ui.dp(36), ui.dp(36)); }
+    private LinearLayout.LayoutParams headerIconSize() { return new LinearLayout.LayoutParams(ui.dp(36), ui.dp(36)); }
 
     private int rootColor() { return screen == STUDIO ? SURFACE : BG; }
 
     private LinearLayout studioHeader() {
-        LinearLayout toolbar = ui.toolbar();
-        toolbar.addView(sidebarButton());
-        LinearLayout heading = ui.column();
-        heading.setPadding(ui.dp(6), 0, ui.dp(6), 0);
+        LinearLayout toolbar = ui.compactToolbar();
+        toolbar.addView(sidebarButton(), headerIconSize());
         studioTitle = ui.single(ui.text("Muse 工作室", 17, INK, true));
-        heading.addView(studioTitle);
-        studioSubtitle = ui.single(ui.text("", 12, TEXT2, false));
-        LinearLayout.LayoutParams subtitlePosition = new LinearLayout.LayoutParams(-1, -2);
-        subtitlePosition.topMargin = ui.dp(4);
-        heading.addView(studioSubtitle, subtitlePosition);
-        heading.setOnClickListener(view -> openSidebar());
-        heading.setContentDescription("打开会话列表");
-        toolbar.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        toolbar.addView(ui.iconButton(R.drawable.ic_add, "新建会话", INK, this::newStudioSession));
+        studioTitle.setPadding(ui.dp(6), 0, ui.dp(6), 0);
+        studioTitle.setGravity(Gravity.CENTER_VERTICAL);
+        studioTitle.setOnClickListener(view -> openSidebar());
+        studioTitle.setFocusable(true);
+        toolbar.addView(studioTitle, new LinearLayout.LayoutParams(0, ui.dp(36), 1));
+        toolbar.addView(ui.compactIconButton(R.drawable.ic_add, "新建会话", INK, this::newStudioSession), headerIconSize());
         updateStudioSessionTitle();
         return toolbar;
     }
@@ -1309,15 +1303,10 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
     private void updateStudioSessionTitle() {
         StudioSession session = studio == null ? null : studio.currentSession();
-        if (studioTitle != null) studioTitle.setText(session == null ? "Muse 工作室" : session.name);
-        if (studioSubtitle != null) {
-            int count = studio == null ? 0 : studio.currentEntries().size();
-            AccountStore.Account account = accounts == null ? null : current();
-            String owner = account == null ? "未选择账号" : account.name;
-            MobileStudio.Entry running = studio == null ? null : studio.running();
-            boolean here = running != null && session != null && session.id.equals(running.sessionId);
-            studioSubtitle.setText((here ? "生成中" : count == 0 ? "还没有记录" : count + " 条记录") + " · " + owner);
-            studioSubtitle.setTextColor(here ? ACCENT : TEXT2);
+        if (studioTitle != null) {
+            String title = session == null ? "Muse 工作室" : session.name;
+            studioTitle.setText(title);
+            studioTitle.setContentDescription(title + "，打开会话列表");
         }
     }
 
@@ -1917,14 +1906,10 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         LinearLayout page = ui.column();
         page.setBackgroundColor(BG);
         // 紧凑顶栏：44dp 高，按钮 36dp，地址栏单行（账号名 · 域名 · 代理）。
-        LinearLayout bar = ui.row();
-        // 与 main 顶部安全区共用 BG；外层不描边，地址栏保留自己的轮廓。
-        bar.setBackgroundColor(BG);
-        bar.setPadding(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(4));
-        bar.setMinimumHeight(ui.dp(44));
-        bar.addView(sidebarButton(), webIconSize());
+        LinearLayout bar = ui.compactToolbar();
+        bar.addView(sidebarButton(), headerIconSize());
         webBack = ui.compactIconButton(R.drawable.ic_web_back, "返回上一页", INK, browser::back);
-        bar.addView(webBack, webIconSize());
+        bar.addView(webBack, headerIconSize());
         LinearLayout url = ui.row();
         url.setBackground(ui.shape(RAISED, 8, LINE));
         url.setPadding(ui.dp(10), 0, ui.dp(10), 0);
@@ -1941,10 +1926,10 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         LinearLayout.LayoutParams urlPosition = new LinearLayout.LayoutParams(0, ui.dp(34), 1);
         urlPosition.setMargins(ui.dp(2), 0, ui.dp(2), 0);
         bar.addView(url, urlPosition);
-        bar.addView(ui.compactIconButton(R.drawable.ic_home, "Muse 首页", INK, () -> browser.navigate(StudioDraft.HOME)), webIconSize());
+        bar.addView(ui.compactIconButton(R.drawable.ic_home, "Muse 首页", INK, () -> browser.navigate(StudioDraft.HOME)), headerIconSize());
         bar.addView(ui.compactIconButton(R.drawable.ic_web_refresh, "刷新网页", INK, () -> {
             if (browser.view() == null) showScreen(WEB); else browser.reload();
-        }), webIconSize());
+        }), headerIconSize());
         ui.block(page, bar, 0);
 
         webProgress = new LinearProgressIndicator(this);

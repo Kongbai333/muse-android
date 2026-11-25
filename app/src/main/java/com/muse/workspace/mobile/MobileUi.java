@@ -208,6 +208,15 @@ final class MobileUi {
         return bar;
     }
 
+    /** 会话与网页共用：44dp 紧凑顶栏，与状态栏安全区同色，无外框。 */
+    LinearLayout compactToolbar() {
+        LinearLayout bar = row();
+        bar.setPadding(dp(4), dp(4), dp(4), dp(4));
+        bar.setMinimumHeight(dp(44));
+        bar.setBackgroundColor(BG);
+        return bar;
+    }
+
     Drawable touchable(int color, int radius, int border) {
         return new RippleDrawable(ColorStateList.valueOf(ripple()), shape(color, radius, border), shape(Color.WHITE, radius, 0));
     }
