@@ -625,14 +625,14 @@ final class MobileUi {
     }
 
     static void tintTicks(View bar, int progress, int empty, int hot) {
-        if (bar instanceof TickBar ticks) { ticks.progressColor=progress; ticks.emptyColor=empty; ticks.hotColor=hot; ticks.invalidate(); }
+        if (bar instanceof TickBar ticks) { ticks.progressColor=progress; ticks.emptyColor=empty; ticks.unknownColor=empty; ticks.hotColor=hot; ticks.invalidate(); }
     }
 
     private final class TickBar extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Double used;
         private boolean known;
-        private int progressColor = PROGRESS, emptyColor = LINE_STRONG, hotColor = ACCENT;
+        private int progressColor = PROGRESS, emptyColor = LINE_STRONG, hotColor = ACCENT, unknownColor = LINE;
 
         TickBar(Context context) { super(context); }
 
@@ -646,7 +646,7 @@ final class MobileUi {
             boolean hot = used != null && used >= 80;
             for (int index = 0; index < count; index++) {
                 float left = index * (width + gap);
-                if (!known) paint.setColor(emptyColor);
+                if (!known) paint.setColor(unknownColor);
                 else if (used == null) paint.setColor(emptyColor);
                 else paint.setColor(index < filled ? (hot ? hotColor : progressColor) : emptyColor);
                 canvas.drawRoundRect(left, 0, left + width, getHeight(), radius, radius, paint);
