@@ -64,7 +64,6 @@ final class QuotaCard {
         divider.setBackgroundColor(skin.hair);
         invitation.addView(divider, new LinearLayout.LayoutParams(ui.dp(1), -1));
         inviteLabel = label(ui, "待获取 —/30");
-        inviteLabel.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_SIMPLE);
         LinearLayout inviteColumn = statColumn(ui, "邀请码 · 已邀请 / 总数", inviteLabel);
         LinearLayout.LayoutParams invitePosition = new LinearLayout.LayoutParams(0, -2, 1.12f);
         invitePosition.setMarginStart(ui.dp(8));
