@@ -21,30 +21,36 @@ final class QuotaCard {
     private final View ticks;
     private final Context context;
     private final Consumer<String> planChanged;
-    final LinearLayout view;
+    final LinearLayout view, details;
 
-    QuotaCard(Context context, MobileUi ui, Consumer<String> planChanged) {
+    QuotaCard(Context context, MobileUi ui, Consumer<String> planChanged, Runnable toggleDetails) {
         this.planChanged = planChanged;
         this.context = context;
         view = ui.column();
+        details = ui.column();
 
         LinearLayout top = ui.row();
         LinearLayout heading = ui.row();
         heading.setBaselineAligned(true);
         heading.addView(ui.text("周额度", 12, TEXT2, false));
-        reset = ui.single(ui.text("", 11, TEXT2, false));
-        reset.setMinWidth(0);
+        reset = ui.text("", 11, TEXT2, false);
         reset.setVisibility(View.GONE);
+        reset.setOnClickListener(ignored -> toggleDetails.run());
+        reset.setFocusable(false);
+        reset.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams resetPosition = new LinearLayout.LayoutParams(0, -2, 1);
         resetPosition.setMarginStart(ui.dp(6));
         heading.addView(reset, resetPosition);
-        LinearLayout.LayoutParams headingPosition = new LinearLayout.LayoutParams(0, -2, 1);
+        // 日期紧跟周额度标签，同组内允许换行；数值另占末端空间，不互相压叠。
+        LinearLayout.LayoutParams headingPosition = new LinearLayout.LayoutParams(0, -2, 2);
         headingPosition.setMarginEnd(ui.dp(8));
         top.addView(heading, headingPosition);
-        week = ui.single(ui.figure("待同步", 12, INK));
+        week = ui.figure("待同步", 12, INK);
         week.setGravity(Gravity.END);
-        week.setMaxWidth(ui.dp(88));
-        top.addView(week, new LinearLayout.LayoutParams(-2, -2));
+        week.setOnClickListener(ignored -> toggleDetails.run());
+        week.setFocusable(false);
+        week.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        top.addView(week, new LinearLayout.LayoutParams(0, -2, 1));
         ui.block(view, top, 0);
 
         ticks = ui.tickBar();
@@ -62,8 +68,8 @@ final class QuotaCard {
         inviteLabel.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         invitation.addView(inviteLabel, new LinearLayout.LayoutParams(0, -2, 1.4f));
         note = ui.text("待同步", 11, MUTED, false);
-        ui.block(view, invitation, 7);
-        ui.block(view, note, 5);
+        ui.block(details, invitation, 7);
+        ui.block(details, note, 5);
     }
 
     void update(AccountCardState card, String state) {
@@ -105,8 +111,8 @@ final class QuotaCard {
         String when = at <= 0 ? "" : " · 上次 " + new SimpleDateFormat("M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(at));
         String sync = current ? "额度已同步" : state.startsWith("未更新") || state.contains("同步中") || state.contains("登录") || state.startsWith("部分") ? state : "未更新";
         note.setText(sync + when + (AccountCardLabels.cached(card, now, usageAt) ? " · 标签含缓存" : ""));
-        view.setContentDescription("周额度 " + week.getText() + (day.isEmpty() ? "" : "，" + day)
-            + "，" + extraText + "，" + inviteText + "，" + note.getText());
+        // 折叠摘要不可提前读出隐藏的邀请、额外额度和同步明细。
+        view.setContentDescription("周额度 " + week.getText() + (day.isEmpty() ? "" : "，" + day));
     }
 
     private TextView label(MobileUi ui, String text) {

@@ -90,8 +90,8 @@ CI 只把签名文件临时还原到 runner 的临时目录，完成后删除；
 `MUSE_ANDROID_KEY_PASSWORD` 环境变量选择自己的签名，不必修改源码。
 
 ```bash
-git tag v0.1.32
-git push origin v0.1.32
+git tag v0.1.33
+git push origin v0.1.33
 ```
 
 ## 网页适配与测试

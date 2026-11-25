@@ -11,6 +11,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -52,6 +53,9 @@ final class AccountSidebar extends FrameLayout {
     private final HashMap<String, QuotaCard> cards = new HashMap<>();
     private final HashMap<String, ImageView> avatarImages = new HashMap<>();
     private final HashMap<String, TextView> avatarFallbacks = new HashMap<>();
+    private final HashMap<String, AccountCard> accountCards = new HashMap<>();
+    private String expandedAccountId;
+    private ValueAnimator accountMotion;
     private ValueAnimator transition;
     private float reveal;
     private boolean hiding;
@@ -210,6 +214,8 @@ final class AccountSidebar extends FrameLayout {
 
     @Override protected void onDetachedFromWindow() {
         cancelTransition();
+        cancelAccountMotion();
+        for (AccountCard card : accountCards.values()) card.reveal(card.expanded ? 1f : 0f);
         super.onDetachedFromWindow();
     }
 
@@ -221,14 +227,17 @@ final class AccountSidebar extends FrameLayout {
         this.studioActive = studioActive;
         this.proxyActive = proxyActive;
 
+        cancelAccountMotion();
+        accountCards.clear();
         cards.clear();
         avatarImages.clear();
         avatarFallbacks.clear();
         rows.removeAllViews();
         for (AccountStore.Account account : accounts) {
             ui.block(rows, accountCard(account, account == current, usable.test(account), quotas.value(account.id)),
-                rows.getChildCount() == 0 ? 0 : 10);
+                rows.getChildCount() == 0 ? 0 : -10);
         }
+        if (!accountCards.containsKey(expandedAccountId)) expandedAccountId = null;
         if (accounts.isEmpty()) rows.addView(empty("还没有 Muse 账号", "添加一个账号，在网页里登录后就能开始创作。"));
 
         shownSessions = new java.util.ArrayList<>(sessions);
@@ -478,12 +487,14 @@ final class AccountSidebar extends FrameLayout {
 
     private View accountCard(AccountStore.Account account, boolean active, boolean usable, AccountQuota quotaData) {
         LinearLayout card = ui.column();
-        card.setPadding(ui.dp(12), ui.dp(12), ui.dp(8), ui.dp(14));
+        // 后一卡仅覆盖这张卡底部预留的 10dp 空白，不遮摘要、详情或操作。
+        card.setPadding(ui.dp(12), ui.dp(12), ui.dp(8), ui.dp(22));
         card.setSelected(active);
-        if (usable) ui.touch(card, BG, 18, active ? ACCENT : LINE, () -> host.openAccount(account));
-        else card.setBackground(ui.shape(BG, 18, LINE));
+        card.setElevation(ui.dp(1));
+        Runnable toggleDetails = () -> toggleAccount(account.id);
+        ui.touch(card, BG, 18, active ? ACCENT : LINE, toggleDetails);
 
-        LinearLayout top = ui.row();
+        LinearLayout identityRow = ui.row();
         FrameLayout portrait = new FrameLayout(getContext());
         int avatarSize = ui.dp(38);
         TextView avatarFallback = ui.avatar(account.name, account.id, 38);
@@ -496,49 +507,214 @@ final class AccountSidebar extends FrameLayout {
         portrait.addView(avatar, new FrameLayout.LayoutParams(avatarSize, avatarSize));
         avatarImages.put(account.id, avatar);
         avatarFallbacks.put(account.id, avatarFallback);
-        top.addView(portrait, new LinearLayout.LayoutParams(avatarSize, avatarSize));
+        identityRow.addView(portrait, new LinearLayout.LayoutParams(avatarSize, avatarSize));
 
         LinearLayout identity = ui.column();
         identity.setPadding(ui.dp(11), 0, ui.dp(4), 0);
-        LinearLayout nameLine = ui.row();
-        TextView label = ui.single(ui.text(account.name, 15, INK, true));
-        label.setMaxWidth(ui.dp(140));
-        nameLine.addView(label, new LinearLayout.LayoutParams(-2, -2, 0f));
+        TextView label = ui.text(account.name, 15, INK, true);
+        label.setMaxLines(2);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setTooltipText(account.name);
+        // Tooltip 文字本身会消费触摸，短按显式复用卡片动作，完整名称仍可长按查看。
+        label.setOnClickListener(ignored -> toggleDetails.run());
+        label.setFocusable(false);
+        label.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ui.block(identity, label, 0);
+        FrameLayout planLine = new FrameLayout(getContext());
         TextView plan = ui.tag(quotaData == null ? "待同步" : quotaData.plan());
-        LinearLayout.LayoutParams tagPosition = new LinearLayout.LayoutParams(-2, -2);
-        tagPosition.setMarginStart(ui.dp(7));
-        nameLine.addView(plan, tagPosition);
-        ui.block(identity, nameLine, 0);
+        FrameLayout.LayoutParams planPosition = new FrameLayout.LayoutParams(-2, -2);
+        planPosition.setMarginEnd(ui.dp(19));
+        planLine.addView(plan, planPosition);
+        View chevron = ui.iconView(R.drawable.ic_chevron_down, TEXT2, 13);
+        chevron.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        FrameLayout.LayoutParams chevronPosition = new FrameLayout.LayoutParams(ui.dp(13), ui.dp(13), Gravity.END | Gravity.CENTER_VERTICAL);
+        planLine.addView(chevron, chevronPosition);
+        ui.block(identity, planLine, 4);
+        identityRow.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
+
+        LinearLayout actions = ui.row();
+        if (usable) {
+            actions.addView(ui.compactIconButton(R.drawable.ic_web_refresh, "刷新「" + account.name + "」的额度", INK,
+                () -> host.refreshAccount(account)));
+            actions.addView(ui.compactIconButton(R.drawable.ic_edit, "编辑「" + account.name + "」", INK,
+                () -> host.editAccount(account)));
+        }
+        ImageButton switchAccount = ui.compactIconButton(R.drawable.ic_account_switch, "切换到账号「" + account.name + "」", INK,
+            () -> { if (usable) host.openAccount(account); });
+        switchAccount.setEnabled(usable);
+        actions.addView(switchAccount);
+        ui.block(card, new AccountHeader(identityRow, actions), 0);
+
         LinearLayout networkLine = ui.row();
         ProxyProfile profile = proxies.find(account.proxyId());
         boolean routed = account.hasProxy();
         networkLine.addView(ui.iconView(routed ? R.drawable.ic_route : R.drawable.ic_globe, TEXT2, 12));
         String network = !usable ? "需更新 WebView" : profile != null ? profile.name : account.networkLabel(proxies);
-        TextView networkText = ui.single(ui.text(network, 12, TEXT2, false));
+        TextView networkText = ui.text(network, 12, TEXT2, false);
         LinearLayout.LayoutParams networkPosition = new LinearLayout.LayoutParams(0, -2, 1);
         networkPosition.setMarginStart(ui.dp(4));
         networkLine.addView(networkText, networkPosition);
-        ui.block(identity, networkLine, 5);
-        top.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
-        if (usable) {
-            top.addView(ui.compactIconButton(R.drawable.ic_web_refresh, "刷新「" + account.name + "」的额度", INK,
-                () -> host.refreshAccount(account)));
-            top.addView(ui.compactIconButton(R.drawable.ic_edit, "编辑「" + account.name + "」", INK,
-                () -> host.editAccount(account)));
-        }
-        ui.block(card, top, 0);
         QuotaCard quota = new QuotaCard(getContext(), ui, value -> {
             plan.setText(value);
             plan.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
-        });
+        }, toggleDetails);
         cards.put(account.id, quota);
         LinearLayout.LayoutParams quotaPosition = new LinearLayout.LayoutParams(-1, -2);
         quotaPosition.topMargin = ui.dp(12);
         quotaPosition.setMarginEnd(ui.dp(4));
         card.addView(quota.view, quotaPosition);
+
+        LinearLayout detailContent = ui.column();
+        detailContent.setPadding(0, ui.dp(10), ui.dp(4), 0);
+        detailContent.addView(networkLine, new LinearLayout.LayoutParams(-1, -2));
+        detailContent.addView(quota.details, new LinearLayout.LayoutParams(-1, -2));
+        AccountDetails details = new AccountDetails(getContext());
+        details.addView(detailContent, new FrameLayout.LayoutParams(-1, -2));
+        card.addView(details, new LinearLayout.LayoutParams(-1, -2));
+        AccountCard holder = new AccountCard(card, details, chevron, account.name + (active ? "，当前账号" : ""));
+        accountCards.put(account.id, holder);
+        holder.setExpanded(account.id.equals(expandedAccountId));
+        holder.reveal(holder.expanded ? 1f : 0f);
         if (!usable) card.setAlpha(0.55f);
-        card.setContentDescription(account.name + (active ? "，当前账号" : "") + "，点按打开网页");
         return card;
+    }
+
+    private void toggleAccount(String id) {
+        if (!accountCards.containsKey(id)) return;
+        cancelAccountMotion();
+        expandedAccountId = id.equals(expandedAccountId) ? null : id;
+        HashMap<AccountCard, Float> starts = new HashMap<>();
+        for (java.util.Map.Entry<String, AccountCard> entry : accountCards.entrySet()) {
+            AccountCard card = entry.getValue();
+            card.setExpanded(entry.getKey().equals(expandedAccountId));
+            if (card.details.fraction != (card.expanded ? 1f : 0f)) starts.put(card, card.details.fraction);
+        }
+        if (starts.isEmpty()) return;
+        if (!ValueAnimator.areAnimatorsEnabled() || !rows.isLaidOut() || !isShown()) {
+            for (AccountCard card : starts.keySet()) card.reveal(card.expanded ? 1f : 0f);
+            return;
+        }
+        ValueAnimator motion = ValueAnimator.ofFloat(0f, 1f);
+        motion.setDuration(260);
+        motion.setInterpolator(new PathInterpolator(0.2f, 0f, 0.2f, 1f));
+        motion.addUpdateListener(value -> {
+            float progress = (float) value.getAnimatedValue();
+            for (java.util.Map.Entry<AccountCard, Float> entry : starts.entrySet()) {
+                AccountCard card = entry.getKey();
+                float start = entry.getValue(), target = card.expanded ? 1f : 0f;
+                card.reveal(start + (target - start) * progress);
+            }
+        });
+        motion.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator animation) {
+                if (accountMotion != animation) return;
+                accountMotion = null;
+                for (AccountCard card : starts.keySet()) card.reveal(card.expanded ? 1f : 0f);
+            }
+        });
+        accountMotion = motion;
+        motion.start();
+    }
+
+    private void cancelAccountMotion() {
+        ValueAnimator previous = accountMotion;
+        accountMotion = null;
+        if (previous != null) previous.cancel();
+    }
+
+    private static final class AccountCard {
+        final LinearLayout view;
+        final AccountDetails details;
+        final View chevron;
+        final String description;
+        boolean expanded;
+
+        AccountCard(LinearLayout view, AccountDetails details, View chevron, String description) {
+            this.view = view;
+            this.details = details;
+            this.chevron = chevron;
+            this.description = description;
+        }
+
+        void setExpanded(boolean value) {
+            expanded = value;
+            details.expanded = value;
+            details.updateInteraction();
+            view.setContentDescription(description + (value ? "，点按收起详情" : "，点按展开详情"));
+            ViewCompat.setStateDescription(view, value ? "已展开" : "已收起");
+        }
+
+        void reveal(float fraction) {
+            details.setFraction(fraction);
+            chevron.setRotation(180f * fraction);
+        }
+    }
+
+    /** 始终按详情的自然高度测量；仅改变容器高度，让列表真正推开后项。 */
+    private static final class AccountDetails extends FrameLayout {
+        float fraction;
+        boolean expanded;
+
+        AccountDetails(Context context) { super(context); }
+
+        void setFraction(float value) {
+            fraction = Math.max(0f, Math.min(1f, value));
+            setVisibility(fraction == 0f ? GONE : VISIBLE);
+            updateInteraction();
+            requestLayout();
+        }
+
+        void updateInteraction() {
+            boolean interactive = expanded && fraction == 1f;
+            setImportantForAccessibility(interactive ? IMPORTANT_FOR_ACCESSIBILITY_AUTO : IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+            setDescendantFocusability(interactive ? FOCUS_BEFORE_DESCENDANTS : FOCUS_BLOCK_DESCENDANTS);
+            if (!interactive) clearFocus();
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+            setMeasuredDimension(getMeasuredWidth(), Math.round(getMeasuredHeight() * fraction));
+        }
+
+        @Override public boolean onInterceptTouchEvent(MotionEvent event) {
+            return !expanded || fraction < 1f || super.onInterceptTouchEvent(event);
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            return !expanded || fraction < 1f || super.onTouchEvent(event);
+        }
+    }
+
+    /** 空间不足时把完整操作组换到下一行，不挤掉头像、账号名或按钮。 */
+    private final class AccountHeader extends LinearLayout {
+        final LinearLayout identity, actions;
+        boolean wrapped;
+
+        AccountHeader(LinearLayout identity, LinearLayout actions) {
+            super(AccountSidebar.this.getContext());
+            this.identity = identity;
+            this.actions = actions;
+            setGravity(Gravity.CENTER_VERTICAL);
+            addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
+            addView(actions, new LinearLayout.LayoutParams(-2, -2));
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            actions.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+            float scale = getResources().getConfiguration().fontScale;
+            boolean wrap = MeasureSpec.getSize(widthMeasureSpec) < actions.getMeasuredWidth() + ui.dp(53 + 96 * scale);
+            if (wrapped != wrap) {
+                wrapped = wrap;
+                setOrientation(wrap ? VERTICAL : HORIZONTAL);
+                identity.setLayoutParams(new LinearLayout.LayoutParams(wrap ? -1 : 0, -2, wrap ? 0 : 1));
+                LinearLayout.LayoutParams position = new LinearLayout.LayoutParams(-2, -2);
+                position.gravity = Gravity.END;
+                position.topMargin = wrap ? ui.dp(4) : 0;
+                actions.setLayoutParams(position);
+            }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        }
     }
 
     void updateQuota(String id, QuotaSync quotas) {
