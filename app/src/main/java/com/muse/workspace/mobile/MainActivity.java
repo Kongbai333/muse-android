@@ -79,6 +79,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private FrameLayout root, body, webFrame;
     private LinearLayout main;
     private AccountSidebar sidebar;
+    private AccountEditor accountEditor;
     private FrameLayout quickSwitch;
     private ImageView quickSwitchPhoto;
     private TextView quickSwitchInitial, quickSwitchCount;
@@ -782,10 +783,15 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     @Override public void refreshAccount(AccountStore.Account account) {
-        if (studio.running() != null) message("请等当前生成结束后刷新额度。");
+        String blocked = null;
+        if (studio.running() != null) blocked = "请等当前生成结束后刷新额度。";
         // WebView 的代理是全局的，刷新其他账号会改变当前网页的网络环境。
-        else if (screen == WEB && account != current()) message("请先回到工作室，再刷新其他账号的额度。");
-        else quotas.refresh(account, multiProfile, true);
+        else if (screen == WEB && account != current()) blocked = "请先回到工作室，再刷新其他账号的额度。";
+        if (blocked != null) {
+            if (accountEditor == null || !accountEditor.refreshBlocked(account.id, blocked)) message(blocked);
+            return;
+        }
+        quotas.refresh(account, multiProfile, true);
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
@@ -1648,6 +1654,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             sidebar.updateAvatar(id, quotas.avatar(id));
         }
         if (!closing) updateQuickSwitchFace();
+        if (!closing && accountEditor != null) accountEditor.updateQuota(id);
     }
 
     @Override public void editAccount(AccountStore.Account account) {
@@ -1667,7 +1674,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
                     avatars.remove(account.id);
                     accountChanged(resetBrowser);
                 }).show();
-        AccountEditor.show(this, ui, account, remove, proxies, accounts, quotas, this::openProxyManager, (name, proxyId, appearance, routeEdited) -> {
+        Runnable refresh = account != null && accounts.all().contains(account) && accounts.usable(account, multiProfile)
+            ? () -> refreshAccount(account) : null;
+        AccountEditor opened = AccountEditor.show(this, ui, account, remove, proxies, accounts, quotas, this::openProxyManager, refresh, (name, proxyId, appearance, routeEdited) -> {
             // 普通卡面是本地外观偏好，不能因此取消任务、刷新额度或重建网页登录。
             boolean sameRoute = account != null && (!routeEdited || account.proxyId().equals(proxyId == null ? "" : proxyId)
                 && !(account.hasProxy() && account.proxyId().isEmpty()));
@@ -1696,6 +1705,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             if (routeChanged) browser.forget(account.id);
             accountChanged(resetBrowser);
         });
+        accountEditor = opened;
+        opened.onDismiss(() -> { if (accountEditor == opened) accountEditor = null; });
     }
 
     @Override public void exportAccounts() { if (transferUi != null) transferUi.exportAccounts(); }
@@ -1907,7 +1918,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         page.setBackgroundColor(BG);
         // 紧凑顶栏：44dp 高，按钮 36dp，地址栏单行（账号名 · 域名 · 代理）。
         LinearLayout bar = ui.row();
-        bar.setBackground(ui.shape(SURFACE, 0, LINE));
+        // 与 main 顶部安全区共用 BG；外层不描边，地址栏保留自己的轮廓。
+        bar.setBackgroundColor(BG);
         bar.setPadding(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(4));
         bar.setMinimumHeight(ui.dp(44));
         bar.addView(sidebarButton(), webIconSize());

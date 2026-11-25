@@ -12,25 +12,27 @@ import java.util.ArrayList;
 import java.util.List;
 import static com.muse.workspace.mobile.MobileUi.*;
 
-/** 编辑草稿内选择材质：只预览，不写偏好，不创建网页或刷新配额。 */
+/** 编辑草稿内选择纯色：只预览，不写偏好，不创建网页或刷新配额。 */
 final class AccountAppearancePicker {
     final LinearLayout preview, palette;
     private final Activity activity;
     private final MobileUi ui;
     private final AccountStore.Account account;
     private final ProxyStore proxies;
-    private final AccountCardState snapshot;
-    private final String quotaState;
-    private final Bitmap avatar;
+    private final QuotaSync quotas;
+    private AccountCardState snapshot;
+    private String quotaState;
+    private Bitmap avatar;
     private final List<View> swatches = new ArrayList<>();
     private final List<View> choices = new ArrayList<>();
+    private final List<TextView> labels = new ArrayList<>();
     private final TextView selectedLabel;
     private AccountAppearance.Skin selected;
     private String name, proxyId;
     private boolean routeEdited;
 
     AccountAppearancePicker(Activity activity, MobileUi ui, AccountStore.Account account, ProxyStore proxies, QuotaSync quotas) {
-        this.activity=activity;this.ui=ui;this.account=account;this.proxies=proxies;
+        this.activity=activity;this.ui=ui;this.account=account;this.proxies=proxies;this.quotas=quotas;
         selected=AccountAppearance.read(activity,account==null?null:account.id);
         name=account==null?"":account.name;proxyId=account==null?"":account.proxyId();
         snapshot=account==null?AccountCardState.read(null,System.currentTimeMillis()):quotas.card(account.id);
@@ -43,13 +45,14 @@ final class AccountAppearancePicker {
             if(i%4==0){row=ui.row();row.setGravity(Gravity.TOP);ui.block(palette,row,8);}
             AccountAppearance.Skin skin=AccountAppearance.ALL[i];
             LinearLayout tile=ui.column();
-            TextView sample=ui.text("MUSE",9,skin.ink,true);sample.setGravity(Gravity.TOP|Gravity.START);sample.setPadding(ui.dp(5),ui.dp(5),0,0);
+            View sample=new View(activity);sample.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             tile.addView(sample,new LinearLayout.LayoutParams(-1,ui.dp(32)));
             TextView label=ui.text(skin.name,12,TEXT2,false);
+            label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             ui.block(tile,label,3);
             tile.setFocusable(true);tile.setOnClickListener(ignored->{selected=skin;paintSelection();paintPreview();});
             LinearLayout.LayoutParams position=new LinearLayout.LayoutParams(0,-2,1);if(i%4!=0)position.setMarginStart(ui.dp(7));
-            row.addView(tile,position);swatches.add(sample);choices.add(tile);
+            row.addView(tile,position);swatches.add(sample);choices.add(tile);labels.add(label);
             if(i==AccountAppearance.ALL.length-1)for(int j=i%4+1;j<4;j++){View spacer=new View(activity);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,1,1);p.setMarginStart(ui.dp(7));row.addView(spacer,p);}
         }
         paintSelection();paintPreview();
@@ -59,11 +62,17 @@ final class AccountAppearancePicker {
 
     void update(String name,String proxyId,boolean routeEdited){this.name=name;this.proxyId=proxyId;this.routeEdited=routeEdited;paintPreview();}
 
+    void refreshQuota(){
+        if(account==null)return;
+        snapshot=quotas.card(account.id);quotaState=quotas.state(account.id);avatar=quotas.avatar(account.id);paintPreview();
+    }
+
     private void paintSelection(){
-        selectedLabel.setText("卡片样式 · 凹印　"+selected.name);
+        selectedLabel.setText("卡片颜色 · "+selected.name);
         for(int i=0;i<choices.size();i++){
             AccountAppearance.Skin skin=AccountAppearance.ALL[i];boolean on=skin.id.equals(selected.id);
             swatches.get(i).setBackground(skin.surface(activity,on,5));choices.get(i).setSelected(on);
+            labels.get(i).setText((on?"✓ ":"")+skin.name);labels.get(i).setTextColor(on?INK:TEXT2);
             choices.get(i).setContentDescription(skin.name+(on?"，已选中":"，选择此卡面"));
         }
     }
@@ -77,7 +86,7 @@ final class AccountAppearancePicker {
         portrait.addView(fallback,new FrameLayout.LayoutParams(-1,-1));
         if(avatar!=null){ImageView image=new ImageView(activity);image.setImageBitmap(avatar);image.setScaleType(ImageView.ScaleType.CENTER_CROP);image.setBackground(ui.shape(RAISED,15,0));image.setClipToOutline(true);portrait.addView(image,new FrameLayout.LayoutParams(-1,-1));}
         LinearLayout words=ui.column();
-        TextView title=ui.text(shown,18,selected.ink,true);title.setMaxLines(2);title.setEllipsize(android.text.TextUtils.TruncateAt.END);selected.press(title);
+        TextView title=AccountCardTypography.name(ui,selected,shown);
         TextView badge=ui.tag(snapshot.plan().isEmpty()?"待同步":snapshot.plan());selected.badge(badge,ui);
         ui.block(words,new AccountNameLine(activity,title,badge,ui),0);
         ProxyProfile profile=proxies.find(proxyId);

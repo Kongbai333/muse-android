@@ -137,8 +137,9 @@ test('values-copy: actual card update is inert until click, copies only full cod
   static final class Toast{static final int LENGTH_SHORT=0;static String shown="";String text;Toast(String s){text=s;}static Toast makeText(Context c,String s,int duration){return new Toast(s);}void show(){shown=text;}}
   static final class Builder{String title,text;Builder setTitle(String s){title=s;return this;}Builder setMessage(String s){text=s;return this;}Builder setPositiveButton(String s,Object listener){if(listener!=null)throw new AssertionError("close must be inert");return this;}void show(){MobileUi.shown=this;}}
   static final class MobileUi{static Builder shown;static Builder dialog(Context c){return new Builder();}static void setTicks(View v,Double used,boolean known){}}
-  static final class Skin{final int ink=0xFF213C33,foil=0xFF426B53;}final Skin skin=new Skin();
-  final Context context=new Context();final TextView week=new TextView(),reset=new TextView(),extraLabel=new TextView(),inviteLabel=new TextView(),note=new TextView();final View ticks=new View();final LinearLayout view=new LinearLayout();final Consumer<String> planChanged=plan->{};
+  static final class Skin{final int ink=0xFF213C33,foil=0xFF426B53,alert=0xFF8A3418;}final Skin skin=new Skin();
+  static final class AccountCardTypography{static void weekly(TextView view,boolean known){view.setTextSize(known?17:12);}}
+  final Context context=new Context();final TextView week=new TextView(),reset=new TextView(),extraLabel=new TextView(),inviteLabel=new TextView();final View ticks=new View();final LinearLayout view=new LinearLayout();final Consumer<String> planChanged=plan->{};
   ${method('QuotaCard.java','void update(')}
   ${method('QuotaCard.java','private void showLabelDetails(')}
   ${copy}

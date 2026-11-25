@@ -13,13 +13,31 @@ import static com.muse.workspace.mobile.MobileUi.*;
 final class AccountEditor {
     interface Save { void account(String name, String proxyId, String appearance, boolean routeEdited) throws Exception; }
 
-    static void show(Activity activity, MobileUi ui, AccountStore.Account account, Runnable remove,
-            ProxyStore proxies, AccountStore accounts, QuotaSync quotas, Runnable manage, Save save) {
+    private final MobileUi.Sheet sheet;
+    private final AccountAppearancePicker appearance;
+    private final QuotaSync quotas;
+    private final String accountId;
+    private TextView refreshStatus;
+    private boolean refreshRequested, refreshReported, refreshDenied;
+
+    private AccountEditor(MobileUi.Sheet sheet, AccountAppearancePicker appearance, QuotaSync quotas, AccountStore.Account account) {
+        this.sheet=sheet;this.appearance=appearance;this.quotas=quotas;accountId=account==null?"":account.id;
+    }
+
+    static AccountEditor show(Activity activity, MobileUi ui, AccountStore.Account account, Runnable remove,
+            ProxyStore proxies, AccountStore accounts, QuotaSync quotas, Runnable manage, Runnable refresh, Save save) {
         MobileUi.Sheet sheet = ui.sheet(activity, account == null ? "添加账号" : "编辑账号",
-            account == null ? "保存后打开网页登录 Muse；回到完整账号卡，点左下同步状态可刷新头像和套餐。"
+            account == null ? "保存后打开网页登录 Muse；之后可在编辑账号中刷新额度、头像和套餐。"
                 : "改动的代理会在下次打开这个账号的网页时生效。");
         AccountAppearancePicker appearance = new AccountAppearancePicker(activity, ui, account, proxies, quotas);
+        AccountEditor editor = new AccountEditor(sheet, appearance, quotas, account);
         sheet.add(appearance.preview, 0);
+        if (refresh != null) {
+            sheet.add(ui.outline("刷新额度", () -> editor.refresh(refresh)), 12);
+            editor.refreshStatus = ui.text("使用已保存的账号配置，保留本次编辑。", 12, TEXT2, false);
+            editor.refreshStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            sheet.add(editor.refreshStatus, 6);
+        }
         EditText name = ui.input("例如：工作号", InputType.TYPE_CLASS_TEXT, account == null ? 36 : Math.max(36, account.name.length()));
         if (account != null) name.setText(account.name);
         sheet.add(ui.field(name, "账号名称"), 14);
@@ -94,5 +112,40 @@ final class AccountEditor {
             }
         }), true);
         sheet.show();
+        return editor;
+    }
+
+    private void refresh(Runnable action) {
+        refreshRequested=true;refreshReported=false;refreshDenied=false;
+        refreshStatus.setText("正在请求刷新…");
+        // 不经过 save / leave，未保存的名称、代理和配色保持在当前草稿里。
+        action.run();
+        if (!refreshDenied && !refreshReported) {
+            boolean running=quotas.state(accountId).contains("同步中");
+            refreshRequested=running;
+            refreshStatus.setText(running ? "此账号正在同步，请稍候。" : "本次未启动刷新，请稍后再试。");
+        }
+    }
+
+    boolean refreshBlocked(String id, String reason) {
+        if (!showing(id) || refreshStatus==null) return false;
+        refreshDenied=true;refreshRequested=false;
+        refreshStatus.setText(reason);
+        return true;
+    }
+
+    void onDismiss(Runnable closed) { sheet.dialog.setOnDismissListener(ignored -> closed.run()); }
+
+    void updateQuota(String id) {
+        if (!showing(id)) return;
+        appearance.refreshQuota();
+        if (refreshRequested && refreshStatus!=null) {
+            refreshReported=true;
+            refreshStatus.setText(quotas.state(accountId));
+        }
+    }
+
+    private boolean showing(String id) {
+        return !accountId.isEmpty() && accountId.equals(id) && sheet.dialog.isShowing();
     }
 }

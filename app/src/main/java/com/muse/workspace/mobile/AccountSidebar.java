@@ -515,10 +515,7 @@ final class AccountSidebar extends FrameLayout {
         avatarImages.put(account.id, avatar);
         avatarFallbacks.put(account.id, avatarFallback);
         LinearLayout identity = ui.column();
-        TextView label = ui.text(account.name, 18, skin.ink, true);
-        skin.press(label);
-        label.setMaxLines(2);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView label = AccountCardTypography.name(ui, skin, account.name);
         label.setTooltipText(account.name);
         // Tooltip 文字本身会消费触摸，短按显式复用卡片动作，完整名称仍可长按查看。
         label.setOnClickListener(ignored -> toggleDetails.run());
@@ -544,7 +541,6 @@ final class AccountSidebar extends FrameLayout {
             plan.setText(value);
             plan.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
         }, toggleDetails, skin);
-        if (usable) quota.setRefreshAction(account.name, () -> { if (usable) host.refreshAccount(account); });
         cards.put(account.id, quota);
         LinearLayout.LayoutParams quotaPosition = new LinearLayout.LayoutParams(-1, -2);
         quotaPosition.topMargin = ui.dp(10);

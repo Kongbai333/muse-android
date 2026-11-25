@@ -16,7 +16,7 @@ import static com.muse.workspace.mobile.MobileUi.*;
 
 /** 账号卡上的额度区：周额度刻度条、重置日期与邀请额度。 */
 final class QuotaCard {
-    private final TextView week, reset, extraLabel, inviteLabel, note;
+    private final TextView week, reset, extraLabel, inviteLabel;
     private final View ticks;
     private final Context context;
     private final Consumer<String> planChanged;
@@ -28,6 +28,8 @@ final class QuotaCard {
         this.context = context;
         this.skin = skin;
         view = ui.column();
+        view.setOnClickListener(ignored -> toggleDetails.run());
+        view.setFocusable(false);
         details = ui.column();
 
         TextView title = ui.text("周额度", 13, skin.ink, true);
@@ -46,7 +48,7 @@ final class QuotaCard {
         ui.block(view, new AccountQuotaLine(context, ui, title, reset, week), 0);
 
         ticks = ui.tickBar();
-        MobileUi.tintTicks(ticks, skin.foil, AccountAppearance.alpha(skin.line, 84), skin.foil);
+        MobileUi.tintTicks(ticks, skin.foil, AccountAppearance.alpha(skin.line, 84), skin.alert);
         LinearLayout.LayoutParams track = new LinearLayout.LayoutParams(-1, ui.dp(5));
         track.topMargin = ui.dp(4);
         view.addView(ticks, track);
@@ -68,24 +70,7 @@ final class QuotaCard {
         LinearLayout.LayoutParams invitePosition = new LinearLayout.LayoutParams(0, -2, 1.12f);
         invitePosition.setMarginStart(ui.dp(8));
         invitation.addView(inviteColumn, invitePosition);
-        note = ui.text("待同步", 12, skin.copy, false);
-        note.setMinHeight(ui.dp(48));
-        note.setGravity(Gravity.CENTER_VERTICAL);
-        note.setBackground(new android.graphics.drawable.RippleDrawable(
-            android.content.res.ColorStateList.valueOf(skin.ripple), null, ui.shape(android.graphics.Color.WHITE, 4, 0)));
-        LinearLayout footer = ui.row();
-        footer.addView(note, new LinearLayout.LayoutParams(0, -2, 1));
-        LinearLayout mark = ui.row();
-        mark.addView(ui.iconView(R.drawable.ic_muse_mark, skin.copy, 12), new LinearLayout.LayoutParams(ui.dp(12), ui.dp(8)));
-        TextView wordmark = ui.text("MUSE", 11, skin.copy, true);
-        LinearLayout.LayoutParams wordPosition = new LinearLayout.LayoutParams(-2, -2);
-        wordPosition.setMarginStart(ui.dp(3));
-        mark.addView(wordmark, wordPosition);
-        LinearLayout.LayoutParams markPosition = new LinearLayout.LayoutParams(-2, -2);
-        markPosition.setMarginStart(ui.dp(5));
-        footer.addView(mark, markPosition);
         ui.block(details, invitation, 8);
-        ui.block(details, footer, 9);
     }
 
     String weeklyText() { return week.getText().toString(); }
@@ -96,20 +81,22 @@ final class QuotaCard {
         String plan = card.plan().isEmpty() ? "待同步" : card.plan();
         planChanged.accept(plan);
         boolean current = data != null && data.currentWeek(now) && "额度已同步".equals(state);
-        String weekly = data == null ? state : data.weekly(now);
+        String weekly = data == null ? ("额度已同步".equals(state) ? "待获取" : state) : data.weekly(now);
         if (data != null && weekly.startsWith("上次 · ")) weekly = weekly.substring("上次 · ".length());
         Double used = data == null ? null : data.used();
         boolean exhausted = used != null && used >= 100;
         week.setText(current && exhausted ? "已用完" : weekly);
-        week.setTextSize(data == null ? 12 : 20);
-        week.setTooltipText(week.getText());
-        week.setTextColor(used != null && used >= 80 ? skin.foil : skin.ink);
+        AccountCardTypography.weekly(week, data != null);
+        week.setTextColor(used != null && used >= 80 ? skin.alert : skin.ink);
         MobileUi.setTicks(ticks, used, data != null);
         ticks.setAlpha(current ? 1f : 0.5f);
         String day = data == null ? "" : data.resetLabel(now);
-        reset.setText(day);
-        reset.setTooltipText(day);
-        reset.setVisibility(day.isEmpty() ? View.GONE : View.VISIBLE);
+        String status = state.contains("同步中") ? "同步中…" : state.contains("登录") ? "请先登录"
+            : state.startsWith("未更新") ? "未更新" : state.startsWith("部分") ? "部分更新" : "";
+        String caption = status.isEmpty() || data == null ? day : status;
+        reset.setText(caption);
+        reset.setTooltipText(state + (day.isEmpty() ? "" : "，" + day));
+        reset.setVisibility(caption.isEmpty() ? View.GONE : View.VISIBLE);
         long usageAt = data == null ? 0 : data.observed();
         String extraText = AccountCardLabels.extra(card), inviteText = AccountCardLabels.invitation(card);
         String extraDetails = AccountCardLabels.extraDetails(card), inviteDetails = AccountCardLabels.inviteDetails(card);
@@ -126,12 +113,17 @@ final class QuotaCard {
             else copyInviteCode(code);
         });
         inviteLabel.setOnLongClickListener(ignored -> { showLabelDetails("邀请信息", inviteDetails); return true; });
-        long at = data == null ? card.lastSuccess() : data.observed();
-        String when = at <= 0 ? "" : " · 上次 " + new SimpleDateFormat("M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(at));
-        String sync = current ? "额度已同步" : state.startsWith("未更新") || state.contains("同步中") || state.contains("登录") || state.startsWith("部分") ? state : "未更新";
-        note.setText(sync + when + (AccountCardLabels.cached(card, now, usageAt) ? " · 标签含缓存" : ""));
+        long at = data == null ? 0 : data.observed();
+        String when = at <= 0 ? "成功时间：未知" : "成功时间：" + new SimpleDateFormat("M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(at));
+        String weeklyDetails = "周额度：" + weekly + "\n" + when + "\n当前状态：" + state
+            + (day.isEmpty() ? "" : "\n" + day) + (!current && data != null ? "\n显示上次成功数据" : "")
+            + (AccountCardLabels.cached(card, now, usageAt) ? "\n额外额度或邀请信息含独立缓存；各字段成功时间可在详情中查看。" : "");
+        week.setTooltipText(weeklyDetails);
+        week.setOnLongClickListener(ignored -> { showLabelDetails("周额度", weeklyDetails); return true; });
+        view.setOnLongClickListener(ignored -> { showLabelDetails("周额度", weeklyDetails); return true; });
         // 折叠摘要不可提前读出隐藏的邀请、额外额度和同步明细。
-        view.setContentDescription("周额度 " + week.getText() + (day.isEmpty() ? "" : "，" + day));
+        view.setContentDescription("周额度 " + week.getText() + (day.isEmpty() ? "" : "，" + day)
+            + (status.isEmpty() ? "" : "，" + state) + (!current && data != null ? "，显示上次成功数据" : ""));
     }
 
     private TextView label(MobileUi ui, String text) {
@@ -156,23 +148,6 @@ final class QuotaCard {
         column.setOnClickListener(ignored -> value.performClick());
         column.setOnLongClickListener(ignored -> value.performLongClick());
         return column;
-    }
-
-    void setRefreshAction(String accountName, Runnable refresh) {
-        note.setOnClickListener(ignored -> refresh.run());
-        note.setFocusable(true);
-        note.setPaintFlags(note.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
-        Consumer<CharSequence> describe = text -> {
-            String explanation = text + "，点按刷新「" + accountName + "」的额度";
-            note.setContentDescription(explanation);
-            note.setTooltipText(explanation);
-        };
-        describe.accept(note.getText());
-        note.addTextChangedListener(new android.text.TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence text, int start, int before, int count) { describe.accept(text); }
-            @Override public void afterTextChanged(android.text.Editable text) { }
-        });
     }
 
     private void showLabelDetails(String title, String text) {
