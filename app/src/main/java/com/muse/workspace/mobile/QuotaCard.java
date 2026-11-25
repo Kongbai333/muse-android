@@ -21,19 +21,21 @@ final class QuotaCard {
     private final View ticks;
     private final Context context;
     private final Consumer<String> planChanged;
+    private final AccountAppearance.Skin skin;
     final LinearLayout view, details;
 
-    QuotaCard(Context context, MobileUi ui, Consumer<String> planChanged, Runnable toggleDetails) {
+    QuotaCard(Context context, MobileUi ui, Consumer<String> planChanged, Runnable toggleDetails, AccountAppearance.Skin skin) {
         this.planChanged = planChanged;
         this.context = context;
+        this.skin = skin;
         view = ui.column();
         details = ui.column();
 
         LinearLayout top = ui.row();
         LinearLayout heading = ui.row();
         heading.setBaselineAligned(true);
-        heading.addView(ui.text("周额度", 12, TEXT2, false));
-        reset = ui.text("", 11, TEXT2, false);
+        heading.addView(ui.text("周额度", 12, skin.copy, false));
+        reset = ui.text("", 12, skin.copy, false);
         reset.setVisibility(View.GONE);
         reset.setOnClickListener(ignored -> toggleDetails.run());
         reset.setFocusable(false);
@@ -45,7 +47,8 @@ final class QuotaCard {
         LinearLayout.LayoutParams headingPosition = new LinearLayout.LayoutParams(0, -2, 2);
         headingPosition.setMarginEnd(ui.dp(8));
         top.addView(heading, headingPosition);
-        week = ui.figure("待同步", 12, INK);
+        week = ui.figure("待同步", 20, skin.ink);
+        skin.press(week);
         week.setGravity(Gravity.END);
         week.setOnClickListener(ignored -> toggleDetails.run());
         week.setFocusable(false);
@@ -54,8 +57,9 @@ final class QuotaCard {
         ui.block(view, top, 0);
 
         ticks = ui.tickBar();
-        LinearLayout.LayoutParams track = new LinearLayout.LayoutParams(-1, ui.dp(10));
-        track.topMargin = ui.dp(7);
+        MobileUi.tintTicks(ticks, skin.foil, AccountAppearance.alpha(skin.line, 84), skin.foil);
+        LinearLayout.LayoutParams track = new LinearLayout.LayoutParams(-1, ui.dp(6));
+        track.topMargin = ui.dp(6);
         view.addView(ticks, track);
 
         LinearLayout invitation = ui.row();
@@ -67,7 +71,7 @@ final class QuotaCard {
         inviteLabel = label(ui, "待获取 —/30");
         inviteLabel.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         invitation.addView(inviteLabel, new LinearLayout.LayoutParams(0, -2, 1.4f));
-        note = ui.text("待同步", 11, MUTED, false);
+        note = ui.text("待同步", 12, skin.copy, false);
         ui.block(details, invitation, 7);
         ui.block(details, note, 5);
     }
@@ -85,8 +89,9 @@ final class QuotaCard {
         Double used = data == null ? null : data.used();
         boolean exhausted = used != null && used >= 100;
         week.setText(current && exhausted ? "已用完" : weekly);
+        week.setTextSize(data == null ? 12 : 20);
         week.setTooltipText(week.getText());
-        week.setTextColor(used != null && used >= 80 ? ACCENT : INK);
+        week.setTextColor(used != null && used >= 80 ? skin.foil : skin.ink);
         MobileUi.setTicks(ticks, used, data != null);
         ticks.setAlpha(current ? 1f : 0.5f);
         String day = data == null ? "" : data.resetLabel(now);
@@ -118,11 +123,14 @@ final class QuotaCard {
     }
 
     private TextView label(MobileUi ui, String text) {
-        TextView label = ui.single(ui.text(text, 12, TEXT2, false));
+        TextView label = ui.single(ui.text(text, 12, skin.copy, false));
         label.setMinWidth(0);
         label.setMinimumHeight(ui.dp(32));
         label.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6));
-        ui.touch(label, RAISED, 10, LINE, () -> { });
+        label.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(skin.ripple), ui.shape(skin.glaze, 8, skin.hair), ui.shape(android.graphics.Color.WHITE, 8, 0)));
+        label.setOnClickListener(ignored -> { });
+        label.setFocusable(true);
         return label;
     }
 

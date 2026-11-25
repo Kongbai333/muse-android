@@ -90,7 +90,7 @@ final class StudioResults {
     private View welcome() {
         LinearLayout welcome = ui.column();
         welcome.setPadding(ui.dp(6), ui.dp(48), ui.dp(6), ui.dp(12));
-        welcome.addView(ui.text("从一个想法开始", 30, INK, true));
+        welcome.addView(ui.text("从一个想法开始", 24, INK, true));
         ui.block(welcome, ui.text("描述画面、加一张参考图，或者先从下面任选一句改起。", 14, TEXT2, false), 12);
         String[][] starters = {
             {"风格和细节", "胶片颗粒，低饱和，柔和侧光，画面留白"},
@@ -105,7 +105,7 @@ final class StudioResults {
             TextView kind = ui.text(item[0], 12, TEXT2, false);
             row.addView(kind, new LinearLayout.LayoutParams(ui.dp(74), -2));
             row.addView(ui.text(item[1], 13.5f, INK, false), new LinearLayout.LayoutParams(0, -2, 1));
-            ui.touch(row, Color.TRANSPARENT, 14, LINE, () -> starter.accept(item[1]));
+            ui.touch(row, SURFACE, 10, LINE, () -> starter.accept(item[1]));
             row.setContentDescription(item[0] + "：" + item[1]);
             ui.block(welcome, row, index == 0 ? 24 : 8);
         }
@@ -155,7 +155,7 @@ final class StudioResults {
             media = new AspectFrame(activity);
             float[] ratio = MobileUi.ratioValue(entry.ratio);
             media.setRatio(ratio[0], ratio[1]);
-            media.setBackground(ui.shape(NIGHT ? 0xFF050506 : RAISED, 18, 0));
+            media.setBackground(ui.shape(RAISED, 9, LINE));
             media.setClipToOutline(true);
             image = new ImageView(activity);
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -163,7 +163,7 @@ final class StudioResults {
             media.addView(image, new FrameLayout.LayoutParams(-1, -1));
 
             overlay = ui.column();
-            overlay.setBackground(ui.shape(0xA80C0C0E, 12, 0));
+            overlay.setBackground(ui.shape(0xCC1B211E, 8, 0));
             overlay.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(11));
             step = ui.single(ui.text("", 12.5f, 0xFFF1EFEA, false));
             overlay.addView(step);
@@ -184,7 +184,7 @@ final class StudioResults {
             stopped = ui.column();
             stopped.setGravity(Gravity.CENTER);
             stopped.setPadding(ui.dp(18), 0, ui.dp(18), 0);
-            stoppedText = ui.text("", 13, NIGHT ? 0xFFD9D7D2 : TEXT2, false);
+            stoppedText = ui.text("", 13, TEXT2, false);
             stoppedText.setGravity(Gravity.CENTER);
             stopped.addView(stoppedText);
             stopped.setVisibility(View.GONE);
@@ -345,7 +345,7 @@ final class StudioResults {
         TextView text = ui.text(entry.prompt, 15, INK, false);
         text.setLineSpacing(ui.dp(5), 1f);
         text.setTextIsSelectable(true);
-        text.setBackground(ui.shape(RAISED, 14, 0));
+        text.setBackground(ui.shape(ACCENT_SOFT, 13, 0));
         text.setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12));
         sheet.add(text, 0);
         if (!entry.text.isEmpty()) {

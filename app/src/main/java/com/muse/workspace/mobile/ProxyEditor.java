@@ -41,7 +41,7 @@ final class ProxyEditor {
             int kind = "ok".equals(message[0]) ? 1 : "warn".equals(message[0]) ? 2 : 0;
             status.setText(message[1]);
             status.setTextColor(kind == 0 ? TEXT2 : INK);
-            status.setBackground(ui.shape(kind == 2 ? ACCENT_SOFT : RAISED, 12, 0));
+            status.setBackground(ui.shape(kind == 2 ? ACCENT_SOFT : RAISED, 9, LINE));
         };
 
         TextView paste = ui.small("粘贴完整代理地址", 0, false, () -> { });

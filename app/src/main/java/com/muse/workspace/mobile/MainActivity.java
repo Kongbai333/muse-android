@@ -253,7 +253,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         disc.setColor(SURFACE);
         disc.setStroke(ui.dp(1), LINE_STRONG);
         ring.setBackground(disc);
-        ring.setElevation(ui.dp(10));
+        ring.setElevation(ui.dp(4));
         ring.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             ring.setOutlineAmbientShadowColor(0xFF000000);
@@ -274,12 +274,12 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         bubble.addView(ring, new FrameLayout.LayoutParams(ui.dp(SWITCH_RING), ui.dp(SWITCH_RING), Gravity.CENTER));
 
         // 可用账号数：压在头像框右上角外侧，和设计稿一致。
-        quickSwitchCount = ui.figure("", 10.5f, BG);
+        quickSwitchCount = ui.figure("", 11, ON_ACCENT);
         quickSwitchCount.setGravity(Gravity.CENTER);
         quickSwitchCount.setMinWidth(ui.dp(19));
         quickSwitchCount.setPadding(ui.dp(5), 0, ui.dp(5), 0);
         android.graphics.drawable.GradientDrawable pill = new android.graphics.drawable.GradientDrawable();
-        pill.setColor(INK);
+        pill.setColor(ACCENT);
         pill.setCornerRadius(ui.dp(10));
         quickSwitchCount.setBackground(pill);
         quickSwitchCount.setElevation(ui.dp(11));
@@ -518,7 +518,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         name.setGravity(Gravity.CENTER);
         name.setAlpha(!selectable ? 0.4f : started ? 1f : 0.5f);
         ui.block(cell, name, 5);
-        TextView status = ui.single(ui.text(detail, 10.5f, TEXT2, false));
+        TextView status = ui.single(ui.text(detail, 12, TEXT2, false));
         status.setMinWidth(0);
         status.setGravity(Gravity.CENTER);
         ui.block(cell, status, 2);
@@ -527,7 +527,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         cell.setContentDescription(description);
         cell.setTooltipText(description);
         cell.setEnabled(selectable);
-        if (selectable) ui.touch(cell, on ? RAISED : Color.TRANSPARENT, 12, 0, () -> {
+        if (selectable) ui.touch(cell, on ? ACCENT_SOFT : SURFACE, 9, LINE, () -> {
             popup.dismiss();
             switchQuickAccount(account);
         });
@@ -851,7 +851,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         toolbar.addView(sidebarButton());
         LinearLayout heading = ui.column();
         heading.setPadding(ui.dp(6), 0, ui.dp(6), 0);
-        studioTitle = ui.single(ui.text("Muse 工作室", 16.5f, INK, true));
+        studioTitle = ui.single(ui.text("Muse 工作室", 17, INK, true));
         heading.addView(studioTitle);
         studioSubtitle = ui.single(ui.text("", 12, TEXT2, false));
         LinearLayout.LayoutParams subtitlePosition = new LinearLayout.LayoutParams(-1, -2);
@@ -882,7 +882,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         LinearLayout transcript = ui.column();
         // 像聊天一样：内容少时贴在输入框上方，最新的一条在最下面。
         transcript.setGravity(Gravity.BOTTOM);
-        transcript.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(24));
+        transcript.setPadding(ui.dp(15), ui.dp(16), ui.dp(15), ui.dp(16));
         studioResults = new StudioResults(this, ui, studio, this::reusePrompt, this::saveMedia, this::appendStarter);
         ui.block(transcript, studioResults.view, 0);
         studioScroll.addView(transcript, new ScrollView.LayoutParams(-1, -2));
@@ -920,9 +920,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private View renderStudioComposer() {
         LinearLayout shell = ui.column();
         studioComposer = shell;
-        shell.setBackground(ui.topShape(SURFACE, 26));
-        shell.setPadding(ui.dp(14), 0, ui.dp(14), ui.dp(8));
-        shell.setElevation(ui.dp(2));
+        shell.setBackground(ui.topShape(SURFACE, 20));
+        shell.setPadding(ui.dp(13), 0, ui.dp(13), ui.dp(10));
+        shell.setElevation(ui.dp(1));
         StudioSession composerSession = studio.currentSession();
         int initialHeight = composerSession == null ? ComposerHeight.DEFAULT_DP : ComposerHeight.clamp(composerSession.composerHeightDp, viewportDp());
 
@@ -1667,10 +1667,20 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
                     avatars.remove(account.id);
                     accountChanged(resetBrowser);
                 }).show();
-        AccountEditor.show(this, ui, account, remove, proxies, accounts, this::openProxyManager, (name, proxyId) -> {
+        AccountEditor.show(this, ui, account, remove, proxies, accounts, quotas, this::openProxyManager, (name, proxyId, appearance, routeEdited) -> {
+            // 普通卡面是本地外观偏好，不能因此取消任务、刷新额度或重建网页登录。
+            boolean sameRoute = account != null && (!routeEdited || account.proxyId().equals(proxyId == null ? "" : proxyId)
+                && !(account.hasProxy() && account.proxyId().isEmpty()));
+            if (account != null && account.name.equals(name) && sameRoute) {
+                AccountAppearance.save(this, account.id, appearance);
+                renderSidebar();
+                return;
+            }
             quotas.cancel();
             if (account == null) {
                 accounts.add(name, proxyId);
+                AccountStore.Account added = current();
+                if (added != null) AccountAppearance.save(this, added.id, appearance);
                 // 新账号会成为当前账号：同一路由时保留原账号的网页。
                 clearFile();
                 browser.switchTo(current(), multiProfile);
@@ -1682,6 +1692,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             boolean routeChanged = !account.proxyId().equals(newProxy) || (account.hasProxy() && account.proxyId().isEmpty());
             boolean resetBrowser = routeChanged && account == current();
             accounts.update(account, name, proxyId);
+            AccountAppearance.save(this, account.id, appearance);
             if (routeChanged) browser.forget(account.id);
             accountChanged(resetBrowser);
         });
@@ -1730,7 +1741,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         toolbar.addView(sidebarButton());
         LinearLayout heading = ui.column();
         heading.setPadding(ui.dp(6), 0, ui.dp(6), 0);
-        heading.addView(ui.single(ui.text("代理设置", 16.5f, INK, true)));
+        heading.addView(ui.single(ui.text("代理设置", 17, INK, true)));
         int inUse = 0;
         for (AccountStore.Account account : accounts.all()) if (account.hasProxy()) inUse++;
         TextView summary = ui.single(ui.text(proxies.all().size() + " 条配置 · " + inUse + " 个账号在用", 12, TEXT2, false));
@@ -1896,14 +1907,14 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         page.setBackgroundColor(BG);
         // 紧凑顶栏：44dp 高，按钮 36dp，地址栏单行（账号名 · 域名 · 代理）。
         LinearLayout bar = ui.row();
-        bar.setBackgroundColor(BG);
+        bar.setBackground(ui.shape(SURFACE, 0, LINE));
         bar.setPadding(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(4));
         bar.setMinimumHeight(ui.dp(44));
         bar.addView(sidebarButton(), webIconSize());
         webBack = ui.compactIconButton(R.drawable.ic_web_back, "返回上一页", INK, browser::back);
         bar.addView(webBack, webIconSize());
         LinearLayout url = ui.row();
-        url.setBackground(ui.shape(RAISED, 10, 0));
+        url.setBackground(ui.shape(RAISED, 8, LINE));
         url.setPadding(ui.dp(10), 0, ui.dp(10), 0);
         url.addView(ui.iconView(R.drawable.ic_lock, TEXT2, 12));
         webTitle = ui.single(ui.text("Muse", 13, INK, true));

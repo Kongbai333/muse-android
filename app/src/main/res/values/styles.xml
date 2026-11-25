@@ -34,7 +34,7 @@
     <style name="MuseTheme" parent="MuseBaseTheme" />
     <style name="MuseDialogShape" parent="ShapeAppearance.Material3.MediumComponent">
         <item name="cornerFamily">rounded</item>
-        <item name="cornerSize">22dp</item>
+        <item name="cornerSize">18dp</item>
     </style>
     <style name="MuseDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorSurface">@color/muse_surface</item>

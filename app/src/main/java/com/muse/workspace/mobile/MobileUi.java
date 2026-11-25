@@ -112,13 +112,13 @@ final class MobileUi {
     static MaterialAlertDialogBuilder dialog(Context context) {
         MobileUi ui = new MobileUi(context);
         MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(context, R.style.MuseDialog);
-        builder.setBackground(ui.shape(SURFACE, 22, LINE));
+        builder.setBackground(ui.shape(SURFACE, 18, LINE));
         return builder;
     }
 
     int dp(float value) { return Math.round(value * context.getResources().getDisplayMetrics().density); }
 
-    int ripple() { return NIGHT ? 0x1FFFFFFF : 0x14141413; }
+    int ripple() { return NIGHT ? 0x21D1E8D5 : 0x18275A46; }
 
     LinearLayout column() {
         LinearLayout layout = new LinearLayout(context);
@@ -158,6 +158,7 @@ final class MobileUi {
         view.setTypeface(Typeface.create(bold ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
         view.setIncludeFontPadding(false);
         view.setLineSpacing(dp(3), 1f);
+        view.setShadowLayer(0, 0, 0, Color.TRANSPARENT);
         return view;
     }
 
@@ -203,7 +204,7 @@ final class MobileUi {
         LinearLayout bar = row();
         bar.setPadding(dp(8), dp(4), dp(8), dp(4));
         bar.setMinimumHeight(dp(56));
-        bar.setBackgroundColor(BG);
+        bar.setBackground(shape(SURFACE, 0, LINE));
         return bar;
     }
 
@@ -225,7 +226,7 @@ final class MobileUi {
         button.setMinHeight(dp(46));
         button.setMinimumHeight(dp(46));
         pad(button, 14, 6);
-        touch(button, color, 13, border, action);
+        touch(button, color, 9, border, action);
         return button;
     }
 
@@ -250,7 +251,7 @@ final class MobileUi {
                 button.setCompoundDrawablePadding(dp(6));
             }
         }
-        touch(button, Color.TRANSPARENT, 10, ghost ? 0 : LINE_STRONG, action);
+        touch(button, ghost ? Color.TRANSPARENT : RAISED, 7, ghost ? 0 : LINE, action);
         return button;
     }
 
@@ -263,7 +264,7 @@ final class MobileUi {
         field.setTextColor(INK);
         field.setHintTextColor(MUTED);
         field.setTextSize(15);
-        field.setBackground(shape(RAISED, 12, 0));
+        field.setBackground(shape(BG, 8, LINE));
         field.setPadding(dp(14), 0, dp(14), 0);
         field.setMinHeight(dp(48));
         field.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});
@@ -320,7 +321,7 @@ final class MobileUi {
         button.setImageResource(icon);
         button.setContentDescription(label);
         button.setTooltipText(label);
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(ripple()), null, shape(Color.WHITE, size >= 40 ? 12 : 10, 0)));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(ripple()), null, shape(Color.WHITE, 8, 0)));
         pad(button, 0, 0);
         int pixels = dp(size);
         button.setLayoutParams(new LinearLayout.LayoutParams(pixels, pixels));
@@ -348,7 +349,7 @@ final class MobileUi {
         button.setImageResource(busy ? R.drawable.ic_stop : R.drawable.ic_send);
         button.setImageTintList(ColorStateList.valueOf(busy ? INK : ON_ACCENT));
         int color = busy ? RAISED : ACCENT;
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(busy ? ripple() : 0x33FFFFFF), shape(color, 15, 0), null));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(busy ? ripple() : 0x33FFFFFF), shape(color, 10, 0), null));
         button.setAlpha(busy || ready ? 1f : 0.45f);
     }
 
@@ -404,7 +405,7 @@ final class MobileUi {
 
         Segment(String[] labels, int[] icons, boolean fill, IntConsumer change) {
             view = row();
-            view.setBackground(shape(RAISED, 11, 0));
+            view.setBackground(shape(RAISED, 9, 0));
             pad(view, 3, 3);
             items = new TextView[labels.length];
             for (int index = 0; index < labels.length; index++) {
@@ -438,7 +439,7 @@ final class MobileUi {
                 TextView item = items[i];
                 item.setTextColor(on ? INK : TEXT2);
                 item.setTypeface(Typeface.create(on ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
-                item.setBackground(on ? shape(BG, 8, 0) : null);
+                item.setBackground(on ? shape(SURFACE, 6, LINE) : null);
                 item.setSelected(on);
                 Drawable[] drawables = item.getCompoundDrawablesRelative();
                 if (drawables[0] != null) drawables[0].setTint(on ? INK : TEXT2);
@@ -473,7 +474,7 @@ final class MobileUi {
         LinearLayout.LayoutParams chevronPosition = new LinearLayout.LayoutParams(dp(13), dp(13));
         chevronPosition.setMarginStart(dp(5));
         chip.addView(chevron, chevronPosition);
-        touch(chip, RAISED, 10, 0, action);
+        touch(chip, RAISED, 7, LINE, action);
         chip.setTag(text);
         return chip;
     }
@@ -532,15 +533,15 @@ final class MobileUi {
         row.setSelected(selected);
         row.setEnabled(enabled);
         row.setAlpha(enabled ? 1f : 0.42f);
-        if (enabled) touch(row, selected ? ACCENT_SOFT : Color.TRANSPARENT, 14, selected ? ACCENT : LINE, action);
-        else row.setBackground(shape(Color.TRANSPARENT, 14, LINE));
+        if (enabled) touch(row, selected ? ACCENT_SOFT : Color.TRANSPARENT, 10, selected ? ACCENT : LINE, action);
+        else row.setBackground(shape(Color.TRANSPARENT, 10, LINE));
         return row;
     }
 
     /** 提示块：普通 / 通过 / 警告。 */
     TextView note(String message, int kind) {
         TextView note = text(message, 13, kind == 0 ? TEXT2 : INK, false);
-        note.setBackground(shape(kind == 2 ? ACCENT_SOFT : RAISED, 12, 0));
+        note.setBackground(shape(kind == 2 ? ACCENT_SOFT : RAISED, 9, LINE));
         note.setPadding(dp(12), dp(11), dp(12), dp(11));
         return note;
     }
@@ -553,14 +554,14 @@ final class MobileUi {
         Sheet(Activity activity, String title, String subtitle) {
             dialog = new BottomSheetDialog(activity, R.style.MuseSheet);
             LinearLayout panel = column();
-            panel.setBackground(topShape(SURFACE, 30));
+            panel.setBackground(topShape(SURFACE, 20));
             panel.setPadding(dp(18), 0, dp(18), dp(22));
             FrameLayout grab = new FrameLayout(activity);
             View handle = new View(activity);
             handle.setBackground(shape(LINE_STRONG, 2, 0));
             grab.addView(handle, new FrameLayout.LayoutParams(dp(38), dp(4), Gravity.CENTER));
             panel.addView(grab, new LinearLayout.LayoutParams(-1, dp(22)));
-            TextView heading = text(title, 19, INK, true);
+            TextView heading = text(title, 18, INK, true);
             heading.setPadding(dp(2), dp(4), dp(2), 0);
             panel.addView(heading);
             if (subtitle != null && !subtitle.isEmpty()) {
@@ -568,7 +569,16 @@ final class MobileUi {
                 sub.setPadding(dp(2), dp(8), dp(2), 0);
                 panel.addView(sub);
             }
-            ScrollView scroll = new ScrollView(activity);
+            ScrollView scroll = new ScrollView(activity) {
+                @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                    int available = getResources().getDisplayMetrics().heightPixels;
+                    View parent = (View) getParent();
+                    if (parent != null && parent.getRootView().getHeight() > 0) available = Math.min(available, parent.getRootView().getHeight());
+                    int limit = Math.round(available * .62f);
+                    if (MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) limit = Math.min(limit, MeasureSpec.getSize(heightMeasureSpec));
+                    super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST));
+                }
+            };
             scroll.setVerticalScrollBarEnabled(false);
             scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
             body = column();
@@ -614,10 +624,15 @@ final class MobileUi {
         if (bar instanceof TickBar ticks) ticks.set(used, known);
     }
 
+    static void tintTicks(View bar, int progress, int empty, int hot) {
+        if (bar instanceof TickBar ticks) { ticks.progressColor=progress; ticks.emptyColor=empty; ticks.hotColor=hot; ticks.invalidate(); }
+    }
+
     private final class TickBar extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Double used;
         private boolean known;
+        private int progressColor = PROGRESS, emptyColor = LINE_STRONG, hotColor = ACCENT;
 
         TickBar(Context context) { super(context); }
 
@@ -631,9 +646,9 @@ final class MobileUi {
             boolean hot = used != null && used >= 80;
             for (int index = 0; index < count; index++) {
                 float left = index * (width + gap);
-                if (!known) paint.setColor(LINE);
-                else if (used == null) paint.setColor(LINE_STRONG);
-                else paint.setColor(index < filled ? (hot ? ACCENT : PROGRESS) : LINE_STRONG);
+                if (!known) paint.setColor(emptyColor);
+                else if (used == null) paint.setColor(emptyColor);
+                else paint.setColor(index < filled ? (hot ? hotColor : progressColor) : emptyColor);
                 canvas.drawRoundRect(left, 0, left + width, getHeight(), radius, radius, paint);
             }
         }

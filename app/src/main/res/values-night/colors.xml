@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 黑夜色板；橙为主操作/额度告警，绿色只用于正常已用进度。 -->
-    <color name="muse_bg">#FF0F0F11</color>
-    <color name="muse_surface">#FF17171A</color>
-    <color name="muse_raised">#FF222226</color>
-    <color name="muse_line">#12FFFFFF</color>
-    <color name="muse_line_strong">#26FFFFFF</color>
-    <color name="muse_text">#FFF1EFEA</color>
-    <color name="muse_text2">#FFA4A29C</color>
-    <color name="muse_muted">#FF6D6C6F</color>
-    <color name="muse_accent">#FFFF5B2E</color>
-    <color name="muse_progress">#FF4ADE80</color>
-    <color name="muse_on_accent">#FF170803</color>
-    <color name="muse_accent_soft">#21FF5B2E</color>
-    <color name="muse_scrim">#9E000000</color>
+    <!-- 深松绿日夜层次；材质卡面使用各自独立的深浅前景。 -->
+    <color name="muse_bg">#FF1B211E</color>
+    <color name="muse_surface">#FF242C27</color>
+    <color name="muse_raised">#FF303A33</color>
+    <color name="muse_line">#FF3C4A41</color>
+    <color name="muse_line_strong">#FF53665A</color>
+    <color name="muse_text">#FFEAF0E5</color>
+    <color name="muse_text2">#FFBECBC0</color>
+    <color name="muse_muted">#FFABB6AE</color>
+    <color name="muse_accent">#FFA9D2B4</color>
+    <color name="muse_progress">#FFA9D2B4</color>
+    <color name="muse_on_accent">#FF152B20</color>
+    <color name="muse_accent_soft">#FF344B3D</color>
+    <color name="muse_scrim">#77000000</color>
     <color name="muse_chrome">@color/muse_bg</color>
 </resources>

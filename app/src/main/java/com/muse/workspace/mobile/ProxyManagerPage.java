@@ -41,7 +41,7 @@ final class ProxyManagerPage extends LinearLayout {
         // 分流状态 + 出口检测入口。
         LinearLayout routing = ui.row();
         routing.setPadding(ui.dp(14), ui.dp(12), ui.dp(10), ui.dp(12));
-        routing.setBackground(ui.shape(RAISED, 16, 0));
+        routing.setBackground(ui.shape(RAISED, 10, LINE));
         TextView state = ui.text(host.routing(), 12, TEXT2, false);
         state.setLineSpacing(ui.dp(3), 1f);
         state.setTooltipText(state.getText());
@@ -58,7 +58,7 @@ final class ProxyManagerPage extends LinearLayout {
         TextView protocol = ui.text(scheme.toUpperCase(java.util.Locale.ROOT), 10.5f, INK, true);
         protocol.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         protocol.setGravity(Gravity.CENTER);
-        protocol.setBackground(ui.shape(RAISED, 6, 0));
+        protocol.setBackground(ui.shape(ACCENT_SOFT, 7, LINE));
         protocol.setPadding(0, ui.dp(5), 0, ui.dp(5));
         protocol.setLayoutParams(new LinearLayout.LayoutParams(ui.dp(62), -2));
         return protocol;
@@ -86,7 +86,7 @@ final class ProxyManagerPage extends LinearLayout {
         row.addView(refs, new LayoutParams(-2, -2));
         row.setContentDescription(profile.name + "，" + profile.scheme.toUpperCase(java.util.Locale.ROOT) + " " + address
             + "，" + referenceLabel(profile, accounts) + "，点按编辑");
-        ui.touch(row, SURFACE, 16, LINE, () -> host.edit(profile));
+        ui.touch(row, SURFACE, 10, LINE, () -> host.edit(profile));
         return row;
     }
 

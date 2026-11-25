@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 白昼：浅色主题。暗房色板见 values-night/colors.xml。 -->
-    <color name="muse_bg">#FFF4F3EF</color>
-    <color name="muse_surface">#FFFFFFFF</color>
-    <color name="muse_raised">#FFEAE9E4</color>
-    <color name="muse_line">#14141413</color>
-    <color name="muse_line_strong">#2B141413</color>
-    <color name="muse_text">#FF141413</color>
-    <color name="muse_text2">#FF5C5B57</color>
-    <color name="muse_muted">#FF9A9893</color>
-    <color name="muse_accent">#FFE5461A</color>
-    <color name="muse_progress">#FF16803D</color>
-    <color name="muse_on_accent">#FFFFFFFF</color>
-    <color name="muse_accent_soft">#1AE5461A</color>
-    <color name="muse_scrim">#5C141413</color>
+    <color name="muse_bg">#FFF5F6F2</color>
+    <color name="muse_surface">#FFFDFEFB</color>
+    <color name="muse_raised">#FFE9EDE5</color>
+    <color name="muse_line">#FFD9E0D7</color>
+    <color name="muse_line_strong">#FFC2CEC1</color>
+    <color name="muse_text">#FF202E27</color>
+    <color name="muse_text2">#FF506056</color>
+    <color name="muse_muted">#FF647269</color>
+    <color name="muse_accent">#FF275A46</color>
+    <color name="muse_progress">#FF426B53</color>
+    <color name="muse_on_accent">#FFFFFDF3</color>
+    <color name="muse_accent_soft">#FFE2ECE2</color>
+    <color name="muse_scrim">#3813231E</color>
     <color name="muse_chrome">@color/muse_bg</color>
 </resources>

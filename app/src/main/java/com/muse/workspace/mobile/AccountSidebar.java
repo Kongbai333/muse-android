@@ -4,11 +4,8 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -87,7 +84,7 @@ final class AccountSidebar extends FrameLayout {
         addView(scrim, new LayoutParams(-1, -1));
 
         panel = ui.column();
-        panel.setBackground(ui.endShape(SURFACE, 30));
+        panel.setBackground(ui.endShape(SURFACE, 20));
         panel.setElevation(ui.dp(10));
         panel.setClickable(true);
         panel.setFocusableInTouchMode(true);
@@ -489,8 +486,9 @@ final class AccountSidebar extends FrameLayout {
     }
 
     private View accountCard(AccountStore.Account account, boolean active, boolean usable, AccountQuota quotaData, boolean followed) {
+        AccountAppearance.Skin skin = AccountAppearance.read(getContext(), account.id);
         LinearLayout card = ui.column();
-        card.setPadding(ui.dp(12), ui.dp(12), ui.dp(8), ui.dp(22));
+        card.setPadding(ui.dp(14), ui.dp(15), ui.dp(14), ui.dp(15));
         Runnable toggleDetails = () -> toggleAccount(account.id);
 
         LinearLayout header = ui.column();
@@ -511,7 +509,8 @@ final class AccountSidebar extends FrameLayout {
 
         LinearLayout identity = ui.column();
         identity.setPadding(ui.dp(11), 0, ui.dp(4), 0);
-        TextView label = ui.text(account.name, 15, INK, true);
+        TextView label = ui.text(account.name, 18, skin.ink, true);
+        skin.press(label);
         label.setMaxLines(2);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setTooltipText(account.name);
@@ -519,41 +518,38 @@ final class AccountSidebar extends FrameLayout {
         label.setOnClickListener(ignored -> toggleDetails.run());
         label.setFocusable(false);
         label.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-        ui.block(identity, label, 0);
+        TextView plan = ui.tag(quotaData == null ? "待同步" : quotaData.plan());
+        skin.badge(plan, ui);
+        plan.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
+        ui.block(identity, new AccountNameLine(getContext(), label, plan, ui), 0);
+        ProxyProfile profile = proxies.find(account.proxyId());
+        String network = profile != null ? profile.name : !account.hasProxy() ? "直连"
+            : account.proxyId().isEmpty() ? account.networkLabel(proxies) : "未配置";
+        TextView networkText = ui.text("代理 · " + network, 13, skin.copy, false);
+        networkText.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
+        ui.block(identity, networkText, 4);
         identityRow.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
         if (usable) {
-            identityRow.addView(ui.compactIconButton(R.drawable.ic_account_switch, "切换到账号「" + account.name + "」", INK,
+            identityRow.addView(cardAction(skin, R.drawable.ic_account_switch, "切换到账号「" + account.name + "」",
                 () -> { if (usable) host.openAccount(account); }));
         }
         ui.block(header, identityRow, 0);
 
         LinearLayout detailContent = ui.column();
         LinearLayout actions = ui.row();
-        LinearLayout planBox = ui.column();
-        TextView plan = ui.tag(quotaData == null ? "待同步" : quotaData.plan());
-        planBox.addView(plan, new LinearLayout.LayoutParams(-2, -2));
-        actions.addView(planBox, new LinearLayout.LayoutParams(0, -2, 1));
+        actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         if (usable) {
-            actions.addView(ui.compactIconButton(R.drawable.ic_web_refresh, "刷新「" + account.name + "」的额度", INK,
+            actions.addView(cardAction(skin, R.drawable.ic_web_refresh, "刷新「" + account.name + "」的额度",
                 () -> host.refreshAccount(account)));
-            actions.addView(ui.compactIconButton(R.drawable.ic_edit, "编辑「" + account.name + "」", INK,
+            actions.addView(cardAction(skin, R.drawable.ic_edit, "编辑「" + account.name + "」",
                 () -> host.editAccount(account)));
         }
         ui.block(detailContent, actions, 0);
 
-        LinearLayout networkLine = ui.row();
-        ProxyProfile profile = proxies.find(account.proxyId());
-        boolean routed = account.hasProxy();
-        networkLine.addView(ui.iconView(routed ? R.drawable.ic_route : R.drawable.ic_globe, TEXT2, 12));
-        String network = !usable ? "需更新 WebView" : profile != null ? profile.name : account.networkLabel(proxies);
-        TextView networkText = ui.text(network, 12, TEXT2, false);
-        LinearLayout.LayoutParams networkPosition = new LinearLayout.LayoutParams(0, -2, 1);
-        networkPosition.setMarginStart(ui.dp(4));
-        networkLine.addView(networkText, networkPosition);
         QuotaCard quota = new QuotaCard(getContext(), ui, value -> {
             plan.setText(value);
             plan.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
-        }, toggleDetails);
+        }, toggleDetails, skin);
         cards.put(account.id, quota);
         LinearLayout.LayoutParams quotaPosition = new LinearLayout.LayoutParams(-1, -2);
         quotaPosition.topMargin = ui.dp(12);
@@ -561,15 +557,13 @@ final class AccountSidebar extends FrameLayout {
         header.addView(quota.view, quotaPosition);
         ui.block(card, header, 0);
 
-        ui.block(detailContent, networkLine, 10);
         detailContent.addView(quota.details, new LinearLayout.LayoutParams(-1, -2));
         ui.block(card, detailContent, 10);
         AccountCardStack.Card holder = new AccountCardStack.Card(getContext(), card, header, detailContent,
-            account.name + (active ? "，当前账号" : ""), followed, toggleDetails);
+            account.name + (active ? "，当前账号" : "") + (!usable ? "，需更新 WebView，不能切换" : ""), followed, toggleDetails);
         holder.setSelected(active);
         holder.setElevation(ui.dp(1));
-        holder.setBackground(new RippleDrawable(ColorStateList.valueOf(ui.ripple()),
-            accountOutline(BG, active ? ACCENT : LINE), accountOutline(Color.WHITE, 0)));
+        holder.setBackground(skin.background(getContext(), active));
         accountCards.put(account.id, holder);
         holder.setExpanded(expandedAccountIds.contains(account.id));
         holder.reveal(holder.expanded() ? 1f : 0f);
@@ -577,12 +571,11 @@ final class AccountSidebar extends FrameLayout {
         return holder;
     }
 
-    private Drawable accountOutline(int color, int border) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color);
-        shape.setCornerRadius(5f);
-        if (border != 0) shape.setStroke(ui.dp(1), border);
-        return shape;
+    private View cardAction(AccountAppearance.Skin skin, int icon, String description, Runnable action) {
+        android.widget.ImageButton button = ui.compactIconButton(icon, description, skin.ink, action);
+        button.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(skin.ripple), ui.shape(skin.glaze, 17, skin.hair), ui.shape(Color.WHITE, 17, 0)));
+        return button;
     }
 
     private void toggleAccount(String id) {
