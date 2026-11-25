@@ -16,7 +16,7 @@ final class AccountEditor {
     static void show(Activity activity, MobileUi ui, AccountStore.Account account, Runnable remove,
             ProxyStore proxies, AccountStore accounts, QuotaSync quotas, Runnable manage, Save save) {
         MobileUi.Sheet sheet = ui.sheet(activity, account == null ? "添加账号" : "编辑账号",
-            account == null ? "保存后打开网页登录 Muse，再点卡片上的刷新同步头像和套餐。"
+            account == null ? "保存后打开网页登录 Muse；回到完整账号卡，点左下同步状态可刷新头像和套餐。"
                 : "改动的代理会在下次打开这个账号的网页时生效。");
         AccountAppearancePicker appearance = new AccountAppearancePicker(activity, ui, account, proxies, quotas);
         sheet.add(appearance.preview, 0);
@@ -27,6 +27,12 @@ final class AccountEditor {
         List<ProxyProfile> available = proxies.all();
         String[] selected = {account == null ? "" : account.proxyId()};
         boolean[] routeEdited = {false};
+        String originalName = name.getText().toString().trim();
+        String originalProxy = selected[0], originalSkin = appearance.selectedId();
+        boolean legacyProxy = account != null && account.hasProxy() && account.proxyId().isEmpty();
+        sheet.guardDismiss(() -> !name.getText().toString().trim().equals(originalName)
+            || !selected[0].equals(originalProxy) || !appearance.selectedId().equals(originalSkin)
+            || legacyProxy && routeEdited[0]);
         name.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence text, int start, int before, int count) { appearance.update(text.toString(), selected[0], routeEdited[0]); }
@@ -56,18 +62,22 @@ final class AccountEditor {
         TextView manageButton = ui.text("管理代理配置", 13.5f, INK, false);
         manageButton.setPaintFlags(manageButton.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
         manageButton.setPadding(ui.dp(2), ui.dp(8), ui.dp(2), ui.dp(4));
+        manageButton.setMinHeight(ui.dp(48));
+        manageButton.setGravity(android.view.Gravity.CENTER_VERTICAL);
         manageButton.setFocusable(true);
         manageButton.setClickable(true);
-        manageButton.setOnClickListener(view -> { sheet.dismiss(); manage.run(); });
+        manageButton.setOnClickListener(view -> sheet.leave(manage));
         LinearLayout links = ui.row();
         links.addView(manageButton);
         if (remove != null) {
             links.addView(ui.spacer());
             TextView delete = ui.text("移除账号", 13.5f, ACCENT, true);
             delete.setPadding(ui.dp(2), ui.dp(8), ui.dp(2), ui.dp(4));
+            delete.setMinHeight(ui.dp(48));
+            delete.setGravity(android.view.Gravity.CENTER_VERTICAL);
             delete.setFocusable(true);
             delete.setClickable(true);
-            delete.setOnClickListener(view -> { sheet.dismiss(); remove.run(); });
+            delete.setOnClickListener(view -> sheet.leave(remove));
             links.addView(delete);
         }
         sheet.add(links, 12);
@@ -78,7 +88,7 @@ final class AccountEditor {
             if (value.isEmpty()) { name.setError("请输入账号名称"); return; }
             try {
                 save.account(value, proxies.find(selected[0]) == null ? "" : selected[0], appearance.selectedId(), routeEdited[0]);
-                sheet.dismiss();
+                sheet.dismissSaved();
             } catch (Exception error) {
                 name.setError(error.getMessage() == null ? "无法保存账号，请重试。" : error.getMessage());
             }

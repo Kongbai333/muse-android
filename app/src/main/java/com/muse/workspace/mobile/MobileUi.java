@@ -546,13 +546,24 @@ final class MobileUi {
         return note;
     }
 
-    /** 底部弹窗：顶部 30dp 圆角，带拖动条、标题与说明。 */
+    /** 底部弹窗；未保存退出保护仅由需要它的表单显式启用。 */
     final class Sheet {
         final BottomSheetDialog dialog;
         final LinearLayout body, actions;
+        private final Activity owner;
+        private java.util.function.BooleanSupplier dirty;
+        private boolean leaving, asking;
 
         Sheet(Activity activity, String title, String subtitle) {
-            dialog = new BottomSheetDialog(activity, R.style.MuseSheet);
+            owner = activity;
+            dialog = new BottomSheetDialog(activity, R.style.MuseSheet) {
+                @Override public void cancel() {
+                    if (!leaving && dirty != null && dirty.getAsBoolean()) {
+                        getBehavior().setState(BottomSheetBehavior.STATE_EXPANDED);
+                        requestLeave(null, true);
+                    } else super.cancel();
+                }
+            };
             LinearLayout panel = column();
             panel.setBackground(topShape(SURFACE, 20));
             panel.setPadding(dp(18), 0, dp(18), dp(22));
@@ -612,7 +623,29 @@ final class MobileUi {
         }
 
         void show() { dialog.show(); }
-        void dismiss() { dialog.dismiss(); }
+        void dismiss() { requestLeave(null, false); }
+        void leave(Runnable after) { requestLeave(after, false); }
+        void guardDismiss(java.util.function.BooleanSupplier dirty) { this.dirty = dirty; }
+        void dismissSaved() { closeNow(null, false); }
+
+        private void requestLeave(Runnable after, boolean cancel) {
+            if (asking) return;
+            if (owner.isFinishing() || owner.isDestroyed()) { closeNow(null, cancel); return; }
+            if (dirty == null || !dirty.getAsBoolean()) { closeNow(after, cancel); return; }
+            asking = true;
+            androidx.appcompat.app.AlertDialog confirmation = MobileUi.dialog(owner)
+                .setTitle("放弃本次修改？")
+                .setMessage("账号名称、代理或卡面还没有保存。你可以继续编辑，或放弃这次修改。")
+                .setNegativeButton("继续编辑", null)
+                .setPositiveButton("放弃修改", (choice, which) -> closeNow(after, cancel)).show();
+            confirmation.setOnDismissListener(ignored -> asking = false);
+        }
+
+        private void closeNow(Runnable after, boolean cancel) {
+            leaving = true;
+            if (cancel) dialog.cancel(); else dialog.dismiss();
+            if (after != null) after.run();
+        }
     }
 
     Sheet sheet(Activity activity, String title, String subtitle) { return new Sheet(activity, title, subtitle); }

@@ -10,6 +10,7 @@ final class AccountNameLine extends ViewGroup {
     private final TextView name, plan;
     private final int gap, rowGap;
     private boolean wrap;
+    private int baseline;
 
     AccountNameLine(Context context, TextView name, TextView plan, MobileUi ui) {
         super(context);
@@ -22,13 +23,14 @@ final class AccountNameLine extends ViewGroup {
         int limit=MeasureSpec.makeMeasureSpec(width,MeasureSpec.AT_MOST);
         name.measure(limit,free);plan.measure(limit,free);
         wrap=plan.getVisibility()!=GONE && name.getMeasuredWidth()+gap+plan.getMeasuredWidth()>width;
-        int height=plan.getVisibility()==GONE?name.getMeasuredHeight():wrap?name.getMeasuredHeight()+rowGap+plan.getMeasuredHeight():Math.max(name.getMeasuredHeight(),plan.getMeasuredHeight());
+        baseline=Math.max(name.getBaseline(),plan.getVisibility()==GONE?0:plan.getBaseline());
+        int height=plan.getVisibility()==GONE?name.getMeasuredHeight():wrap?name.getMeasuredHeight()+rowGap+plan.getMeasuredHeight():Math.max(baseline-name.getBaseline()+name.getMeasuredHeight(),baseline-plan.getBaseline()+plan.getMeasuredHeight());
         setMeasuredDimension(resolveSize(width,widthMeasureSpec),resolveSize(height,heightMeasureSpec));
     }
 
     @Override protected void onLayout(boolean changed,int left,int top,int right,int bottom){
-        place(name,0,0);
-        if(plan.getVisibility()!=GONE)place(plan,wrap?0:name.getMeasuredWidth()+gap,wrap?name.getMeasuredHeight()+rowGap:Math.max(0,name.getBaseline()-plan.getBaseline()));
+        place(name,0,wrap||plan.getVisibility()==GONE?0:baseline-name.getBaseline());
+        if(plan.getVisibility()!=GONE)place(plan,wrap?0:name.getMeasuredWidth()+gap,wrap?name.getMeasuredHeight()+rowGap:baseline-plan.getBaseline());
     }
 
     private void place(View view,int start,int top){int x=getLayoutDirection()==LAYOUT_DIRECTION_RTL?getWidth()-start-view.getMeasuredWidth():start;view.layout(x,top,x+view.getMeasuredWidth(),top+view.getMeasuredHeight());}

@@ -2134,7 +2134,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override public void onBackPressed() {
         if (!ready) { super.onBackPressed(); return; }
         if (videoView != null) { hideVideo(); return; }
-        if (sidebar.isOpen()) { sidebar.close(true); return; }
+        if (sidebar.isOpen()) { if (!sidebar.finishPickingOnBack()) sidebar.close(true); return; }
         if (screen == WEB && browser.canGoBack()) { browser.back(); return; }
         if (screen != STUDIO) { showScreen(STUDIO); return; }
         super.onBackPressed();

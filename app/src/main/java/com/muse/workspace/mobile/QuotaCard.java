@@ -3,7 +3,6 @@ package com.muse.workspace.mobile;
 import android.content.Context;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -31,49 +30,63 @@ final class QuotaCard {
         view = ui.column();
         details = ui.column();
 
-        LinearLayout top = ui.row();
-        LinearLayout heading = ui.row();
-        heading.setBaselineAligned(true);
-        heading.addView(ui.text("周额度", 12, skin.copy, false));
+        TextView title = ui.text("周额度", 13, skin.ink, true);
         reset = ui.text("", 12, skin.copy, false);
         reset.setVisibility(View.GONE);
         reset.setOnClickListener(ignored -> toggleDetails.run());
         reset.setFocusable(false);
         reset.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams resetPosition = new LinearLayout.LayoutParams(0, -2, 1);
-        resetPosition.setMarginStart(ui.dp(6));
-        heading.addView(reset, resetPosition);
-        // 日期紧跟周额度标签，同组内允许换行；数值另占末端空间，不互相压叠。
-        LinearLayout.LayoutParams headingPosition = new LinearLayout.LayoutParams(0, -2, 2);
-        headingPosition.setMarginEnd(ui.dp(8));
-        top.addView(heading, headingPosition);
-        week = ui.figure("待同步", 20, skin.ink);
+        week = new AccountCardValue(context, true);
+        week.setText("待同步");
         skin.press(week);
         week.setGravity(Gravity.END);
         week.setOnClickListener(ignored -> toggleDetails.run());
         week.setFocusable(false);
         week.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        top.addView(week, new LinearLayout.LayoutParams(0, -2, 1));
-        ui.block(view, top, 0);
+        ui.block(view, new AccountQuotaLine(context, ui, title, reset, week), 0);
 
         ticks = ui.tickBar();
         MobileUi.tintTicks(ticks, skin.foil, AccountAppearance.alpha(skin.line, 84), skin.foil);
-        LinearLayout.LayoutParams track = new LinearLayout.LayoutParams(-1, ui.dp(6));
-        track.topMargin = ui.dp(6);
+        LinearLayout.LayoutParams track = new LinearLayout.LayoutParams(-1, ui.dp(5));
+        track.topMargin = ui.dp(4);
         view.addView(ticks, track);
 
+        View rule = new View(context);
+        rule.setBackgroundColor(skin.hair);
+        details.addView(rule, new LinearLayout.LayoutParams(-1, ui.dp(1)));
         LinearLayout invitation = ui.row();
-        invitation.setBaselineAligned(true);
-        extraLabel = label(ui, "额外 —/—");
+        invitation.setGravity(Gravity.TOP);
+        extraLabel = label(ui, "—/—");
         LinearLayout.LayoutParams extraPosition = new LinearLayout.LayoutParams(0, -2, 1);
         extraPosition.setMarginEnd(ui.dp(8));
-        invitation.addView(extraLabel, extraPosition);
+        invitation.addView(statColumn(ui, "额外额度 · 已用 / 总量", extraLabel), extraPosition);
+        View divider = new View(context);
+        divider.setBackgroundColor(skin.hair);
+        invitation.addView(divider, new LinearLayout.LayoutParams(ui.dp(1), -1));
         inviteLabel = label(ui, "待获取 —/30");
-        inviteLabel.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        invitation.addView(inviteLabel, new LinearLayout.LayoutParams(0, -2, 1.4f));
+        inviteLabel.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_SIMPLE);
+        LinearLayout inviteColumn = statColumn(ui, "邀请码 · 已邀请 / 总数", inviteLabel);
+        LinearLayout.LayoutParams invitePosition = new LinearLayout.LayoutParams(0, -2, 1.12f);
+        invitePosition.setMarginStart(ui.dp(8));
+        invitation.addView(inviteColumn, invitePosition);
         note = ui.text("待同步", 12, skin.copy, false);
-        ui.block(details, invitation, 7);
-        ui.block(details, note, 5);
+        note.setMinHeight(ui.dp(48));
+        note.setGravity(Gravity.CENTER_VERTICAL);
+        note.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(skin.ripple), null, ui.shape(android.graphics.Color.WHITE, 4, 0)));
+        LinearLayout footer = ui.row();
+        footer.addView(note, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout mark = ui.row();
+        mark.addView(ui.iconView(R.drawable.ic_muse_mark, skin.copy, 12), new LinearLayout.LayoutParams(ui.dp(12), ui.dp(8)));
+        TextView wordmark = ui.text("MUSE", 11, skin.copy, true);
+        LinearLayout.LayoutParams wordPosition = new LinearLayout.LayoutParams(-2, -2);
+        wordPosition.setMarginStart(ui.dp(3));
+        mark.addView(wordmark, wordPosition);
+        LinearLayout.LayoutParams markPosition = new LinearLayout.LayoutParams(-2, -2);
+        markPosition.setMarginStart(ui.dp(5));
+        footer.addView(mark, markPosition);
+        ui.block(details, invitation, 8);
+        ui.block(details, footer, 9);
     }
 
     String weeklyText() { return week.getText().toString(); }
@@ -101,7 +114,7 @@ final class QuotaCard {
         long usageAt = data == null ? 0 : data.observed();
         String extraText = AccountCardLabels.extra(card), inviteText = AccountCardLabels.invitation(card);
         String extraDetails = AccountCardLabels.extraDetails(card), inviteDetails = AccountCardLabels.inviteDetails(card);
-        extraLabel.setText(extraText);
+        extraLabel.setText(extraText.startsWith("额外 ") ? extraText.substring("额外 ".length()) : extraText);
         extraLabel.setContentDescription(extraText + "，点按查看精确额度和成功时间");
         extraLabel.setTooltipText(extraDetails);
         extraLabel.setOnClickListener(ignored -> showLabelDetails("额外额度", extraDetails));
@@ -123,15 +136,44 @@ final class QuotaCard {
     }
 
     private TextView label(MobileUi ui, String text) {
-        TextView label = ui.single(ui.text(text, 12, skin.copy, false));
+        TextView label = new AccountCardValue(context, false);
+        label.setText(text);
+        skin.press(label);
         label.setMinWidth(0);
         label.setMinimumHeight(ui.dp(32));
-        label.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6));
+        label.setPadding(0, 0, 0, 0);
         label.setBackground(new android.graphics.drawable.RippleDrawable(
-            android.content.res.ColorStateList.valueOf(skin.ripple), ui.shape(skin.glaze, 8, skin.hair), ui.shape(android.graphics.Color.WHITE, 8, 0)));
+            android.content.res.ColorStateList.valueOf(skin.ripple), null, ui.shape(android.graphics.Color.WHITE, 4, 0)));
         label.setOnClickListener(ignored -> { });
         label.setFocusable(true);
         return label;
+    }
+
+    private LinearLayout statColumn(MobileUi ui, String title, TextView value) {
+        LinearLayout column = ui.column();
+        column.addView(ui.text(title, 12, skin.copy, false), new LinearLayout.LayoutParams(-1, -2));
+        ui.block(column, value, 3);
+        column.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        column.setOnClickListener(ignored -> value.performClick());
+        column.setOnLongClickListener(ignored -> value.performLongClick());
+        return column;
+    }
+
+    void setRefreshAction(String accountName, Runnable refresh) {
+        note.setOnClickListener(ignored -> refresh.run());
+        note.setFocusable(true);
+        note.setPaintFlags(note.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+        Consumer<CharSequence> describe = text -> {
+            String explanation = text + "，点按刷新「" + accountName + "」的额度";
+            note.setContentDescription(explanation);
+            note.setTooltipText(explanation);
+        };
+        describe.accept(note.getText());
+        note.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) { describe.accept(text); }
+            @Override public void afterTextChanged(android.text.Editable text) { }
+        });
     }
 
     private void showLabelDetails(String title, String text) {

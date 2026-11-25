@@ -5,6 +5,7 @@ import android.graphics.Rect;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -51,21 +52,30 @@ final class AccountCardStack extends ViewGroup {
         private final LinearLayout content;
         private final View header;
         private final ViewGroup details;
+        private final AccountCardTop top;
         private final String description;
         private final boolean followed;
         private String weekly = "待同步";
         private float expansion;
+        private int moveFrom = -1;
+        private float moveProgress;
         private boolean expanded, cancelledGesture;
         private int uncoveredHeight = Integer.MAX_VALUE;
+        private final int touchSlop;
+        private float downX, downY;
 
-        Card(Context context, LinearLayout content, View header, ViewGroup details,
+        Card(Context context, LinearLayout content, View header, ViewGroup details, AccountCardTop top,
                 String description, boolean followed, Runnable toggle) {
             super(context);
             this.content = content;
             this.header = header;
             this.details = details;
+            this.top = top;
             this.description = description;
             this.followed = followed;
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+            int border = Math.round(getResources().getDisplayMetrics().density);
+            setPadding(border, border, border, border);
             addView(content, new FrameLayout.LayoutParams(-1, -2));
             setClipToOutline(true);
             setFocusable(true);
@@ -80,21 +90,23 @@ final class AccountCardStack extends ViewGroup {
         private int detailsTop() {
             int margin = details.getLayoutParams() instanceof LinearLayout.LayoutParams
                 ? ((LinearLayout.LayoutParams) details.getLayoutParams()).topMargin : 0;
-            return content.getPaddingTop() + header.getMeasuredHeight() + margin;
+            return getPaddingTop() + content.getPaddingTop() + header.getMeasuredHeight() + margin;
         }
 
         int followingOffset() {
             int natural = getMeasuredHeight();
-            // 约半张错位；头部必须露全，下一张最迟从详情起点开始覆盖。
-            int headerBottom = content.getPaddingTop() + header.getMeasuredHeight();
-            int stacked = Math.min(natural, Math.max(headerBottom, Math.min(Math.round(natural * 0.5f), detailsTop())));
-            return stacked + Math.round((natural - stacked) * expansion);
+            // 与 HTML upper 一致：包含进度条后 11dp 留白，下一张从这里覆盖。
+            int border = Math.round(getResources().getDisplayMetrics().density);
+            int stacked = Math.min(natural, content.getPaddingTop() + header.getMeasuredHeight() + border);
+            if (moveFrom >= 0) return Math.round(moveFrom + ((expanded ? natural : stacked) - moveFrom) * moveProgress);
+            return expanded ? natural : stacked;
         }
 
         void setWeekly(String value) { weekly = value; describe(); }
 
         void setExpanded(boolean value) {
             expanded = followed && value;
+            top.showEditor(!followed || expanded);
             describe();
             ViewCompat.setStateDescription(this, !followed ? "完整显示" : expanded ? "已展开" : "已叠放");
         }
@@ -106,6 +118,14 @@ final class AccountCardStack extends ViewGroup {
 
         void reveal(float value) {
             expansion = Math.max(0f, Math.min(1f, value));
+            moveFrom = -1;
+            if (getParent() != null) getParent().requestLayout();
+        }
+
+        void beginMove(int currentOffset) { moveFrom = currentOffset; moveProgress = 0f; }
+
+        void move(float value) {
+            moveProgress = Math.max(0f, Math.min(1f, value));
             if (getParent() != null) getParent().requestLayout();
         }
 
@@ -128,17 +148,22 @@ final class AccountCardStack extends ViewGroup {
             if (action == MotionEvent.ACTION_DOWN) {
                 if (!insideVisibleCard(event)) return false;
                 cancelledGesture = false;
+                downX = event.getX(); downY = event.getY();
             }
             if (cancelledGesture) return true;
-            if (action != MotionEvent.ACTION_CANCEL && !insideVisibleCard(event)) {
+            float dx = event.getX() - downX, dy = event.getY() - downY;
+            if (action != MotionEvent.ACTION_CANCEL && (!insideVisibleCard(event)
+                    || event.getPointerCount() > 1
+                    || (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) && dx * dx + dy * dy > touchSlop * touchSlop)) {
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
+                top.actionTouch(this, cancel);
                 super.dispatchTouchEvent(cancel);
                 cancel.recycle();
                 cancelledGesture = true;
                 return true;
             }
-            return super.dispatchTouchEvent(event);
+            return top.actionTouch(this, event) || super.dispatchTouchEvent(event);
         }
 
         @Override public boolean onInterceptTouchEvent(MotionEvent event) {

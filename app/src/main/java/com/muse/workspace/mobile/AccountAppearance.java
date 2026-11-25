@@ -74,7 +74,8 @@ final class AccountAppearance {
             ripple = alpha(ink, dark ? 40 : 24);
         }
 
-        Drawable surface(Context context, boolean selected) { return new Surface(context, this, selected); }
+        Drawable surface(Context context, boolean selected) { return surface(context, selected, 23); }
+        Drawable surface(Context context, boolean selected, float radius) { return new Surface(context, this, selected, radius); }
 
         Drawable background(Context context, boolean selected) {
             GradientDrawable mask = new GradientDrawable();
@@ -105,14 +106,16 @@ final class AccountAppearance {
         private final Skin skin;
         private final float density;
         private final boolean selected;
+        private final float radiusDp;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path etch = new Path();
         private final List<Path> fields = new ArrayList<>();
         private final RectF box = new RectF();
         private int opacity = 255;
 
-        Surface(Context context, Skin skin, boolean selected) {
+        Surface(Context context, Skin skin, boolean selected, float radiusDp) {
             this.skin = skin; this.selected = selected;
+            this.radiusDp = radiusDp;
             density = context.getResources().getDisplayMetrics().density;
             build();
         }
@@ -193,7 +196,7 @@ final class AccountAppearance {
 
         @Override public void draw(Canvas canvas) {
             box.set(getBounds());
-            float radius=Math.min(23*density,box.height()*.18f);
+            float radius=Math.min(radiusDp*density,Math.min(box.width(),box.height())/2);
             paint.setStyle(Paint.Style.FILL); paint.setShader(new LinearGradient(box.left,box.top,box.right,box.bottom,
                 new int[]{skin.high,skin.paper,skin.low},new float[]{0,.47f,1},Shader.TileMode.CLAMP));
             paint.setAlpha(opacity); canvas.drawRoundRect(box,radius,radius,paint); paint.setShader(null);
@@ -220,7 +223,7 @@ final class AccountAppearance {
             paint.setShader(new LinearGradient(158,0,420,0,new int[]{alpha(color,0),alpha(color,Math.round(opacity*strength))},null,Shader.TileMode.CLAMP));
             canvas.save();canvas.translate(dx,dy);canvas.drawPath(etch,paint);canvas.restore();
         }
-        @Override public void getOutline(Outline outline){outline.setRoundRect(getBounds(),Math.min(23*density,getBounds().height()*.18f));}
+        @Override public void getOutline(Outline outline){outline.setRoundRect(getBounds(),Math.min(radiusDp*density,Math.min(getBounds().width(),getBounds().height())/2f));}
         @Override public void setAlpha(int value){opacity=value;invalidateSelf();}
         @Override public void setColorFilter(ColorFilter value){paint.setColorFilter(value);invalidateSelf();}
         @Override public int getOpacity(){return PixelFormat.TRANSLUCENT;}

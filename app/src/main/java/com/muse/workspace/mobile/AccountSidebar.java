@@ -314,6 +314,14 @@ final class AccountSidebar extends FrameLayout {
         refreshPicking();
     }
 
+    boolean finishPickingOnBack() {
+        if (!picking) return false;
+        int scroll = sessionScroll.getScrollY();
+        finishPicking();
+        sessionScroll.post(() -> sessionScroll.scrollTo(0, scroll));
+        return true;
+    }
+
     private void togglePicked(StudioSession session) {
         if (session.id.equals(shownRunning)) return;
         if (!picked.remove(session.id)) picked.add(session.id);
@@ -336,7 +344,9 @@ final class AccountSidebar extends FrameLayout {
         row.setPadding(ui.dp(14), ui.dp(7), ui.dp(12), ui.dp(7));
         TextView title = ui.single(ui.text(session.name, 14, INK, selected));
         title.setMinWidth(0);
-        title.setTooltipText(session.name);
+        // 标题不再单独持有 tooltip 手势，短按和长按都交给整行。
+        title.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        title.setFocusable(false);
         LinearLayout.LayoutParams titlePosition = new LinearLayout.LayoutParams(0, -2, 1);
         titlePosition.setMarginEnd(ui.dp(6));
         row.addView(title, titlePosition);
@@ -488,27 +498,23 @@ final class AccountSidebar extends FrameLayout {
     private View accountCard(AccountStore.Account account, boolean active, boolean usable, AccountQuota quotaData, boolean followed) {
         AccountAppearance.Skin skin = AccountAppearance.read(getContext(), account.id);
         LinearLayout card = ui.column();
-        card.setPadding(ui.dp(14), ui.dp(15), ui.dp(14), ui.dp(15));
+        card.setPadding(ui.dp(14), ui.dp(15), ui.dp(14), ui.dp(13));
         Runnable toggleDetails = () -> toggleAccount(account.id);
 
         LinearLayout header = ui.column();
-        LinearLayout identityRow = ui.row();
+        header.setPadding(0, 0, 0, ui.dp(11));
         FrameLayout portrait = new FrameLayout(getContext());
-        int avatarSize = ui.dp(38);
-        TextView avatarFallback = ui.avatar(account.name, account.id, 38);
-        portrait.addView(avatarFallback, new FrameLayout.LayoutParams(avatarSize, avatarSize));
+        TextView avatarFallback = ui.avatar(account.name, account.id, 35);
+        portrait.addView(avatarFallback, new FrameLayout.LayoutParams(-1, -1));
         ImageView avatar = new ImageView(getContext());
         avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        avatar.setBackground(ui.shape(RAISED, 19, 0));
+        avatar.setBackground(ui.shape(RAISED, 18, 0));
         avatar.setClipToOutline(true);
         avatar.setVisibility(View.GONE);
-        portrait.addView(avatar, new FrameLayout.LayoutParams(avatarSize, avatarSize));
+        portrait.addView(avatar, new FrameLayout.LayoutParams(-1, -1));
         avatarImages.put(account.id, avatar);
         avatarFallbacks.put(account.id, avatarFallback);
-        identityRow.addView(portrait, new LinearLayout.LayoutParams(avatarSize, avatarSize));
-
         LinearLayout identity = ui.column();
-        identity.setPadding(ui.dp(11), 0, ui.dp(4), 0);
         TextView label = ui.text(account.name, 18, skin.ink, true);
         skin.press(label);
         label.setMaxLines(2);
@@ -525,41 +531,29 @@ final class AccountSidebar extends FrameLayout {
         ProxyProfile profile = proxies.find(account.proxyId());
         String network = profile != null ? profile.name : !account.hasProxy() ? "直连"
             : account.proxyId().isEmpty() ? account.networkLabel(proxies) : "未配置";
-        TextView networkText = ui.text("代理 · " + network, 13, skin.copy, false);
-        networkText.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
-        ui.block(identity, networkText, 4);
-        identityRow.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
-        if (usable) {
-            identityRow.addView(cardAction(skin, R.drawable.ic_account_switch, "切换到账号「" + account.name + "」",
-                () -> { if (usable) host.openAccount(account); }));
-        }
-        ui.block(header, identityRow, 0);
+        ui.block(identity, AccountCardTop.proxyLine(getContext(), ui, skin, network), 4);
+        AccountCardAction edit = usable ? new AccountCardAction(getContext(), ui, skin, R.drawable.ic_edit,
+            "编辑「" + account.name + "」", () -> { if (usable) host.editAccount(account); }) : null;
+        AccountCardAction switchAccount = usable ? new AccountCardAction(getContext(), ui, skin, R.drawable.ic_account_switch,
+            "切换到账号「" + account.name + "」", () -> { if (usable) host.openAccount(account); }) : null;
+        AccountCardTop top = new AccountCardTop(getContext(), ui, portrait, identity, edit, switchAccount, false);
+        ui.block(header, top, 0);
 
         LinearLayout detailContent = ui.column();
-        LinearLayout actions = ui.row();
-        actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        if (usable) {
-            actions.addView(cardAction(skin, R.drawable.ic_web_refresh, "刷新「" + account.name + "」的额度",
-                () -> host.refreshAccount(account)));
-            actions.addView(cardAction(skin, R.drawable.ic_edit, "编辑「" + account.name + "」",
-                () -> host.editAccount(account)));
-        }
-        ui.block(detailContent, actions, 0);
-
         QuotaCard quota = new QuotaCard(getContext(), ui, value -> {
             plan.setText(value);
             plan.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
         }, toggleDetails, skin);
+        if (usable) quota.setRefreshAction(account.name, () -> { if (usable) host.refreshAccount(account); });
         cards.put(account.id, quota);
         LinearLayout.LayoutParams quotaPosition = new LinearLayout.LayoutParams(-1, -2);
-        quotaPosition.topMargin = ui.dp(12);
-        quotaPosition.setMarginEnd(ui.dp(4));
+        quotaPosition.topMargin = ui.dp(10);
         header.addView(quota.view, quotaPosition);
         ui.block(card, header, 0);
 
         detailContent.addView(quota.details, new LinearLayout.LayoutParams(-1, -2));
-        ui.block(card, detailContent, 10);
-        AccountCardStack.Card holder = new AccountCardStack.Card(getContext(), card, header, detailContent,
+        ui.block(card, detailContent, 0);
+        AccountCardStack.Card holder = new AccountCardStack.Card(getContext(), card, header, detailContent, top,
             account.name + (active ? "，当前账号" : "") + (!usable ? "，需更新 WebView，不能切换" : ""), followed, toggleDetails);
         holder.setSelected(active);
         holder.setElevation(ui.dp(1));
@@ -571,31 +565,26 @@ final class AccountSidebar extends FrameLayout {
         return holder;
     }
 
-    private View cardAction(AccountAppearance.Skin skin, int icon, String description, Runnable action) {
-        android.widget.ImageButton button = ui.compactIconButton(icon, description, skin.ink, action);
-        button.setBackground(new android.graphics.drawable.RippleDrawable(
-            android.content.res.ColorStateList.valueOf(skin.ripple), ui.shape(skin.glaze, 17, skin.hair), ui.shape(Color.WHITE, 17, 0)));
-        return button;
-    }
-
     private void toggleAccount(String id) {
         AccountCardStack.Card card = accountCards.get(id);
         if (card == null || !card.hasFollowing()) return; // 末卡本来就整张可见，不制造假折叠态。
         ValueAnimator previous = accountMotions.remove(id);
         if (previous != null) previous.cancel();
+        int currentOffset = card.followingOffset();
         boolean open = !card.expanded();
         if (open) expandedAccountIds.add(id);
         else expandedAccountIds.remove(id);
         card.setExpanded(open);
-        float start = card.expansion(), target = open ? 1f : 0f;
+        float target = open ? 1f : 0f;
+        card.beginMove(currentOffset);
         if (!ValueAnimator.areAnimatorsEnabled() || !rows.isLaidOut() || !isShown()) {
             card.reveal(target);
             return;
         }
-        ValueAnimator motion = ValueAnimator.ofFloat(start, target);
+        ValueAnimator motion = ValueAnimator.ofFloat(0f, 1f);
         motion.setDuration(260);
         motion.setInterpolator(new PathInterpolator(0.2f, 0f, 0.2f, 1f));
-        motion.addUpdateListener(value -> card.reveal((float) value.getAnimatedValue()));
+        motion.addUpdateListener(value -> card.move((float) value.getAnimatedValue()));
         motion.addListener(new AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(Animator animation) {
                 if (accountMotions.get(id) != animation) return;

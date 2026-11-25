@@ -192,19 +192,9 @@ final class StudioResults {
 
             if (thumbnail) card.addView(media, new LinearLayout.LayoutParams(-1, -2));
 
-            // 提示词：默认显示 3 行，点按展开 / 收起；完整内容可在“提示词”里查看和复制。
-            TextView prompt = ui.text(entry.prompt, 14, INK, false);
-            prompt.setLineSpacing(ui.dp(4), 1f);
-            prompt.setMaxLines(3);
-            prompt.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            prompt.setContentDescription("提示词：" + entry.prompt + "，点按展开");
-            prompt.setOnClickListener(view -> {
-                boolean collapsed = prompt.getMaxLines() == 3;
-                prompt.setMaxLines(collapsed ? Integer.MAX_VALUE : 3);
-                prompt.setEllipsize(collapsed ? null : android.text.TextUtils.TruncateAt.END);
-            });
-            prompt.setOnLongClickListener(view -> { showPrompt(entry); return true; });
+            StudioPromptView prompt = new StudioPromptView(activity, ui, entry.prompt, () -> showPrompt(entry));
             ui.block(card, prompt, thumbnail ? 12 : 0);
+            ui.block(card, prompt.hint(), 0);
             reply = ui.text("", 13, TEXT2, false);
             reply.setTextIsSelectable(true);
             ui.block(card, reply, 6);
