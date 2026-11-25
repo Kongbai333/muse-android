@@ -4,8 +4,11 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -47,13 +50,17 @@ final class AccountSidebar extends FrameLayout {
     private final Host host;
     private final ProxyStore proxies;
     private final View scrim;
-    private final LinearLayout panel, rows, sessionRows, footer, navigation;
+    private final LinearLayout panel, sessionRows, footer, navigation;
+    private final AccountCardStack rows;
     private final ScrollView accountScroll, sessionScroll;
     private final MobileUi.Segment tabs;
     private final HashMap<String, QuotaCard> cards = new HashMap<>();
     private final HashMap<String, ImageView> avatarImages = new HashMap<>();
     private final HashMap<String, TextView> avatarFallbacks = new HashMap<>();
-    private final HashMap<String, AccountCard> accountCards = new HashMap<>();
+    private final HashMap<String, AccountCardStack.Card> accountCards = new HashMap<>();
+    private final HashMap<String, TextView> summaryWeeks = new HashMap<>();
+    private final HashMap<String, ImageView> summaryAvatars = new HashMap<>();
+    private final HashMap<String, TextView> summaryFallbacks = new HashMap<>();
     private String expandedAccountId;
     private ValueAnimator accountMotion;
     private ValueAnimator transition;
@@ -107,7 +114,7 @@ final class AccountSidebar extends FrameLayout {
         sessionScroll.setVerticalScrollBarEnabled(false);
         sessionScroll.addView(sessionRows, new ScrollView.LayoutParams(-1, -2));
         lists.addView(sessionScroll, new FrameLayout.LayoutParams(-1, -1));
-        rows = ui.column();
+        rows = new AccountCardStack(context, ui.dp(6));
         rows.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10));
         accountScroll = new ScrollView(context);
         accountScroll.setVerticalScrollBarEnabled(false);
@@ -215,7 +222,7 @@ final class AccountSidebar extends FrameLayout {
     @Override protected void onDetachedFromWindow() {
         cancelTransition();
         cancelAccountMotion();
-        for (AccountCard card : accountCards.values()) card.reveal(card.expanded ? 1f : 0f);
+        for (AccountCardStack.Card card : accountCards.values()) card.reveal(card.expanded() ? 1f : 0f);
         super.onDetachedFromWindow();
     }
 
@@ -232,10 +239,12 @@ final class AccountSidebar extends FrameLayout {
         cards.clear();
         avatarImages.clear();
         avatarFallbacks.clear();
+        summaryWeeks.clear();
+        summaryAvatars.clear();
+        summaryFallbacks.clear();
         rows.removeAllViews();
         for (AccountStore.Account account : accounts) {
-            ui.block(rows, accountCard(account, account == current, usable.test(account), quotas.value(account.id)),
-                rows.getChildCount() == 0 ? 0 : -10);
+            rows.addView(accountCard(account, account == current, usable.test(account), quotas.value(account.id)));
         }
         if (!accountCards.containsKey(expandedAccountId)) expandedAccountId = null;
         if (accounts.isEmpty()) rows.addView(empty("还没有 Muse 账号", "添加一个账号，在网页里登录后就能开始创作。"));
@@ -487,12 +496,8 @@ final class AccountSidebar extends FrameLayout {
 
     private View accountCard(AccountStore.Account account, boolean active, boolean usable, AccountQuota quotaData) {
         LinearLayout card = ui.column();
-        // 后一卡仅覆盖这张卡底部预留的 10dp 空白，不遮摘要、详情或操作。
         card.setPadding(ui.dp(12), ui.dp(12), ui.dp(8), ui.dp(22));
-        card.setSelected(active);
-        card.setElevation(ui.dp(1));
         Runnable toggleDetails = () -> toggleAccount(account.id);
-        ui.touch(card, BG, 18, active ? ACCENT : LINE, toggleDetails);
 
         LinearLayout identityRow = ui.row();
         FrameLayout portrait = new FrameLayout(getContext());
@@ -520,16 +525,10 @@ final class AccountSidebar extends FrameLayout {
         label.setFocusable(false);
         label.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         ui.block(identity, label, 0);
-        FrameLayout planLine = new FrameLayout(getContext());
         TextView plan = ui.tag(quotaData == null ? "待同步" : quotaData.plan());
-        FrameLayout.LayoutParams planPosition = new FrameLayout.LayoutParams(-2, -2);
-        planPosition.setMarginEnd(ui.dp(19));
-        planLine.addView(plan, planPosition);
-        View chevron = ui.iconView(R.drawable.ic_chevron_down, TEXT2, 13);
-        chevron.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-        FrameLayout.LayoutParams chevronPosition = new FrameLayout.LayoutParams(ui.dp(13), ui.dp(13), Gravity.END | Gravity.CENTER_VERTICAL);
-        planLine.addView(chevron, chevronPosition);
-        ui.block(identity, planLine, 4);
+        LinearLayout.LayoutParams planPosition = new LinearLayout.LayoutParams(-2, -2);
+        planPosition.topMargin = ui.dp(4);
+        identity.addView(plan, planPosition);
         identityRow.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
 
         LinearLayout actions = ui.row();
@@ -568,30 +567,81 @@ final class AccountSidebar extends FrameLayout {
         detailContent.setPadding(0, ui.dp(10), ui.dp(4), 0);
         detailContent.addView(networkLine, new LinearLayout.LayoutParams(-1, -2));
         detailContent.addView(quota.details, new LinearLayout.LayoutParams(-1, -2));
-        AccountDetails details = new AccountDetails(getContext());
-        details.addView(detailContent, new FrameLayout.LayoutParams(-1, -2));
-        card.addView(details, new LinearLayout.LayoutParams(-1, -2));
-        AccountCard holder = new AccountCard(card, details, chevron, account.name + (active ? "，当前账号" : ""));
+        card.addView(detailContent, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout summary = accountSummary(account, usable, toggleDetails);
+        AccountCardStack.Card holder = new AccountCardStack.Card(getContext(), card, summary,
+            account.name + (active ? "，当前账号" : ""), toggleDetails);
+        holder.setSelected(active);
+        holder.setElevation(ui.dp(1));
+        holder.setBackground(new RippleDrawable(ColorStateList.valueOf(ui.ripple()),
+            accountOutline(BG, active ? ACCENT : LINE), accountOutline(Color.WHITE, 0)));
         accountCards.put(account.id, holder);
         holder.setExpanded(account.id.equals(expandedAccountId));
-        holder.reveal(holder.expanded ? 1f : 0f);
-        if (!usable) card.setAlpha(0.55f);
-        return card;
+        holder.reveal(holder.expanded() ? 1f : 0f);
+        if (!usable) holder.setAlpha(0.55f);
+        return holder;
+    }
+
+    private Drawable accountOutline(int color, int border) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(5f);
+        if (border != 0) shape.setStroke(ui.dp(1), border);
+        return shape;
+    }
+
+    private LinearLayout accountSummary(AccountStore.Account account, boolean usable, Runnable toggle) {
+        LinearLayout summary = ui.row();
+        summary.setPadding(ui.dp(12), ui.dp(12), ui.dp(8), ui.dp(12));
+        FrameLayout portrait = new FrameLayout(getContext());
+        TextView fallback = ui.avatar(account.name, account.id, 38);
+        portrait.addView(fallback, new FrameLayout.LayoutParams(ui.dp(38), ui.dp(38)));
+        ImageView avatar = new ImageView(getContext());
+        avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        avatar.setBackground(ui.shape(RAISED, 19, 0));
+        avatar.setClipToOutline(true);
+        avatar.setVisibility(GONE);
+        portrait.addView(avatar, new FrameLayout.LayoutParams(ui.dp(38), ui.dp(38)));
+        summary.addView(portrait, new LinearLayout.LayoutParams(ui.dp(38), ui.dp(38)));
+        summaryAvatars.put(account.id, avatar);
+        summaryFallbacks.put(account.id, fallback);
+        LinearLayout identity = ui.column();
+        identity.setPadding(ui.dp(11), 0, ui.dp(8), 0);
+        TextView name = ui.text(account.name, 15, INK, true);
+        name.setMaxLines(2);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setTooltipText(account.name);
+        name.setOnClickListener(ignored -> toggle.run());
+        name.setFocusable(false);
+        name.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ui.block(identity, name, 0);
+        TextView week = ui.figure("待同步", 12, INK);
+        week.setOnClickListener(ignored -> toggle.run());
+        week.setFocusable(false);
+        week.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ui.block(identity, week, 4);
+        summaryWeeks.put(account.id, week);
+        summary.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
+        ImageButton switchAccount = ui.compactIconButton(R.drawable.ic_account_switch, "切换到账号「" + account.name + "」", INK,
+            () -> { if (usable) host.openAccount(account); });
+        switchAccount.setEnabled(usable);
+        summary.addView(switchAccount);
+        return summary;
     }
 
     private void toggleAccount(String id) {
         if (!accountCards.containsKey(id)) return;
         cancelAccountMotion();
         expandedAccountId = id.equals(expandedAccountId) ? null : id;
-        HashMap<AccountCard, Float> starts = new HashMap<>();
-        for (java.util.Map.Entry<String, AccountCard> entry : accountCards.entrySet()) {
-            AccountCard card = entry.getValue();
+        HashMap<AccountCardStack.Card, Float> starts = new HashMap<>();
+        for (java.util.Map.Entry<String, AccountCardStack.Card> entry : accountCards.entrySet()) {
+            AccountCardStack.Card card = entry.getValue();
             card.setExpanded(entry.getKey().equals(expandedAccountId));
-            if (card.details.fraction != (card.expanded ? 1f : 0f)) starts.put(card, card.details.fraction);
+            if (card.expansion() != (card.expanded() ? 1f : 0f)) starts.put(card, card.expansion());
         }
         if (starts.isEmpty()) return;
         if (!ValueAnimator.areAnimatorsEnabled() || !rows.isLaidOut() || !isShown()) {
-            for (AccountCard card : starts.keySet()) card.reveal(card.expanded ? 1f : 0f);
+            for (AccountCardStack.Card card : starts.keySet()) card.reveal(card.expanded() ? 1f : 0f);
             return;
         }
         ValueAnimator motion = ValueAnimator.ofFloat(0f, 1f);
@@ -599,9 +649,9 @@ final class AccountSidebar extends FrameLayout {
         motion.setInterpolator(new PathInterpolator(0.2f, 0f, 0.2f, 1f));
         motion.addUpdateListener(value -> {
             float progress = (float) value.getAnimatedValue();
-            for (java.util.Map.Entry<AccountCard, Float> entry : starts.entrySet()) {
-                AccountCard card = entry.getKey();
-                float start = entry.getValue(), target = card.expanded ? 1f : 0f;
+            for (java.util.Map.Entry<AccountCardStack.Card, Float> entry : starts.entrySet()) {
+                AccountCardStack.Card card = entry.getKey();
+                float start = entry.getValue(), target = card.expanded() ? 1f : 0f;
                 card.reveal(start + (target - start) * progress);
             }
         });
@@ -609,7 +659,7 @@ final class AccountSidebar extends FrameLayout {
             @Override public void onAnimationEnd(Animator animation) {
                 if (accountMotion != animation) return;
                 accountMotion = null;
-                for (AccountCard card : starts.keySet()) card.reveal(card.expanded ? 1f : 0f);
+                for (AccountCardStack.Card card : starts.keySet()) card.reveal(card.expanded() ? 1f : 0f);
             }
         });
         accountMotion = motion;
@@ -620,69 +670,6 @@ final class AccountSidebar extends FrameLayout {
         ValueAnimator previous = accountMotion;
         accountMotion = null;
         if (previous != null) previous.cancel();
-    }
-
-    private static final class AccountCard {
-        final LinearLayout view;
-        final AccountDetails details;
-        final View chevron;
-        final String description;
-        boolean expanded;
-
-        AccountCard(LinearLayout view, AccountDetails details, View chevron, String description) {
-            this.view = view;
-            this.details = details;
-            this.chevron = chevron;
-            this.description = description;
-        }
-
-        void setExpanded(boolean value) {
-            expanded = value;
-            details.expanded = value;
-            details.updateInteraction();
-            view.setContentDescription(description + (value ? "，点按收起详情" : "，点按展开详情"));
-            ViewCompat.setStateDescription(view, value ? "已展开" : "已收起");
-        }
-
-        void reveal(float fraction) {
-            details.setFraction(fraction);
-            chevron.setRotation(180f * fraction);
-        }
-    }
-
-    /** 始终按详情的自然高度测量；仅改变容器高度，让列表真正推开后项。 */
-    private static final class AccountDetails extends FrameLayout {
-        float fraction;
-        boolean expanded;
-
-        AccountDetails(Context context) { super(context); }
-
-        void setFraction(float value) {
-            fraction = Math.max(0f, Math.min(1f, value));
-            setVisibility(fraction == 0f ? GONE : VISIBLE);
-            updateInteraction();
-            requestLayout();
-        }
-
-        void updateInteraction() {
-            boolean interactive = expanded && fraction == 1f;
-            setImportantForAccessibility(interactive ? IMPORTANT_FOR_ACCESSIBILITY_AUTO : IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-            setDescendantFocusability(interactive ? FOCUS_BEFORE_DESCENDANTS : FOCUS_BLOCK_DESCENDANTS);
-            if (!interactive) clearFocus();
-        }
-
-        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
-            setMeasuredDimension(getMeasuredWidth(), Math.round(getMeasuredHeight() * fraction));
-        }
-
-        @Override public boolean onInterceptTouchEvent(MotionEvent event) {
-            return !expanded || fraction < 1f || super.onInterceptTouchEvent(event);
-        }
-
-        @Override public boolean onTouchEvent(MotionEvent event) {
-            return !expanded || fraction < 1f || super.onTouchEvent(event);
-        }
     }
 
     /** 空间不足时把完整操作组换到下一行，不挤掉头像、账号名或按钮。 */
@@ -719,13 +706,24 @@ final class AccountSidebar extends FrameLayout {
 
     void updateQuota(String id, QuotaSync quotas) {
         QuotaCard card = cards.get(id);
-        if (card != null) card.update(quotas.card(id), quotas.state(id));
+        if (card == null) return;
+        card.update(quotas.card(id), quotas.state(id));
+        TextView summary = summaryWeeks.get(id);
+        if (summary != null) {
+            summary.setText(card.weeklyText());
+            summary.setTooltipText(card.weeklyText());
+        }
+        AccountCardStack.Card frame = accountCards.get(id);
+        if (frame != null) frame.setWeekly(card.weeklyText());
     }
 
     void updateAvatar(String id, android.graphics.Bitmap image) {
-        ImageView view = avatarImages.get(id);
+        applyAvatar(avatarImages.get(id), avatarFallbacks.get(id), image);
+        applyAvatar(summaryAvatars.get(id), summaryFallbacks.get(id), image);
+    }
+
+    private void applyAvatar(ImageView view, TextView fallback, android.graphics.Bitmap image) {
         if (view == null) return;
-        TextView fallback = avatarFallbacks.get(id);
         if (image == null) {
             view.setImageDrawable(null);
             view.setVisibility(View.GONE);

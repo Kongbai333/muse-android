@@ -72,6 +72,8 @@ final class QuotaCard {
         ui.block(details, note, 5);
     }
 
+    String weeklyText() { return week.getText().toString(); }
+
     void update(AccountCardState card, String state) {
         long now = System.currentTimeMillis();
         AccountQuota data = card.quota(now);
