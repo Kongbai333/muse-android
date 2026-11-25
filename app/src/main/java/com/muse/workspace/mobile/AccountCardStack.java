@@ -7,15 +7,13 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import androidx.core.view.ViewCompat;
 
-/** 卡片始终按原内容自然高度测量，只改变列表中的位置及可见裁剪区域。 */
+/** 同宽原高的实体卡依次绘制，后卡覆盖前卡；只改变相邻顶部的距离。 */
 final class AccountCardStack extends ViewGroup {
-    private final int gap;
-
-    AccountCardStack(Context context, int gap) {
+    AccountCardStack(Context context) {
         super(context);
-        this.gap = gap;
         setClipChildren(true);
     }
 
@@ -27,12 +25,12 @@ final class AccountCardStack extends ViewGroup {
         int height = getPaddingTop();
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
-            // 不把露出高度作为卡片的测量约束；完整卡和详情从未缩为零或 GONE。
             child.measure(MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
-            if (i > 0) height += gap;
-            height += child instanceof Card ? ((Card) child).exposedHeight() : child.getMeasuredHeight();
+            height += i == getChildCount() - 1 || !(child instanceof Card)
+                ? child.getMeasuredHeight() : ((Card) child).followingOffset();
         }
+        // 末卡完整收尾；不是每张露出高度的总和，也不额外追加一张卡的空白。
         setMeasuredDimension(resolveSize(width, widthMeasureSpec), resolveSize(height + getPaddingBottom(), heightMeasureSpec));
     }
 
@@ -40,120 +38,125 @@ final class AccountCardStack extends ViewGroup {
         int y = getPaddingTop();
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
-            if (i > 0) y += gap;
             child.layout(getPaddingLeft(), y, getPaddingLeft() + child.getMeasuredWidth(), y + child.getMeasuredHeight());
-            y += child instanceof Card ? ((Card) child).exposedHeight() : child.getMeasuredHeight();
+            int offset = i == getChildCount() - 1 || !(child instanceof Card)
+                ? child.getMeasuredHeight() : ((Card) child).followingOffset();
+            if (child instanceof Card) ((Card) child).setUncoveredHeight(offset);
+            y += offset;
         }
     }
 
-    /** 完整卡自然排版不变；摘要是叠放露出区域的独立表面，不参与压缩完整卡。 */
+    /** 一张始终不透明、原高的卡面；没有重复摘要、逐卡裁剪或淡入淡出。 */
     static final class Card extends FrameLayout {
-        private final ViewGroup full, summary;
+        private final LinearLayout content;
+        private final View header;
+        private final ViewGroup details;
         private final String description;
+        private final boolean followed;
         private String weekly = "待同步";
         private float expansion;
-        private boolean expanded, compactGesture, summaryGesture, clippedGesture;
+        private boolean expanded, cancelledGesture;
+        private int uncoveredHeight = Integer.MAX_VALUE;
 
-        Card(Context context, ViewGroup full, ViewGroup summary, String description, Runnable toggle) {
+        Card(Context context, LinearLayout content, View header, ViewGroup details,
+                String description, boolean followed, Runnable toggle) {
             super(context);
-            this.full = full;
-            this.summary = summary;
+            this.content = content;
+            this.header = header;
+            this.details = details;
             this.description = description;
-            addView(full, new FrameLayout.LayoutParams(-1, -2));
-            addView(summary, new FrameLayout.LayoutParams(-1, -2));
+            this.followed = followed;
+            addView(content, new FrameLayout.LayoutParams(-1, -2));
             setClipToOutline(true);
             setFocusable(true);
-            setOnClickListener(ignored -> toggle.run());
+            if (followed) setOnClickListener(ignored -> toggle.run());
             setExpanded(false);
-            reveal(0f);
         }
 
+        boolean hasFollowing() { return followed; }
         float expansion() { return expansion; }
         boolean expanded() { return expanded; }
 
-        int exposedHeight() {
+        private int detailsTop() {
+            int margin = details.getLayoutParams() instanceof LinearLayout.LayoutParams
+                ? ((LinearLayout.LayoutParams) details.getLayoutParams()).topMargin : 0;
+            return content.getPaddingTop() + header.getMeasuredHeight() + margin;
+        }
+
+        int followingOffset() {
             int natural = getMeasuredHeight();
-            int compact = Math.min(natural, summary.getMeasuredHeight());
-            return compact + Math.round((natural - compact) * expansion);
+            // 约半张错位；头部必须露全，下一张最迟从详情起点开始覆盖。
+            int headerBottom = content.getPaddingTop() + header.getMeasuredHeight();
+            int stacked = Math.min(natural, Math.max(headerBottom, Math.min(Math.round(natural * 0.5f), detailsTop())));
+            return stacked + Math.round((natural - stacked) * expansion);
         }
 
         void setWeekly(String value) { weekly = value; describe(); }
 
         void setExpanded(boolean value) {
-            expanded = value;
-            updateInteraction();
+            expanded = followed && value;
             describe();
-            ViewCompat.setStateDescription(this, value ? "已展开" : "已叠放");
+            ViewCompat.setStateDescription(this, !followed ? "完整显示" : expanded ? "已展开" : "已叠放");
         }
 
         private void describe() {
-            setContentDescription(description + "，周额度 " + weekly + (expanded ? "，点按叠回" : "，点按展开"));
+            setContentDescription(description + "，周额度 " + weekly
+                + (!followed ? "，完整账号卡" : expanded ? "，点按叠回" : "，点按展开"));
         }
 
         void reveal(float value) {
             expansion = Math.max(0f, Math.min(1f, value));
-            full.setAlpha(expansion);
-            summary.setAlpha(1f - expansion);
-            // INVISIBLE 只用于重复的摘要表面；完整卡/详情始终 VISIBLE 且保持原高。
-            summary.setVisibility(fullyOpen() ? INVISIBLE : VISIBLE);
-            updateInteraction();
-            setClipBounds(new Rect(0, 0, getMeasuredWidth(), exposedHeight()));
             if (getParent() != null) getParent().requestLayout();
         }
 
-        private boolean fullyOpen() { return expanded && expansion == 1f; }
+        private int visibleHeight() { return Math.min(getMeasuredHeight(), uncoveredHeight); }
 
-        private void updateInteraction() {
-            boolean open = fullyOpen();
-            full.setImportantForAccessibility(open ? IMPORTANT_FOR_ACCESSIBILITY_AUTO : IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-            full.setDescendantFocusability(open ? FOCUS_BEFORE_DESCENDANTS : FOCUS_BLOCK_DESCENDANTS);
-            summary.setImportantForAccessibility(open ? IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS : IMPORTANT_FOR_ACCESSIBILITY_AUTO);
-            summary.setDescendantFocusability(open ? FOCUS_BLOCK_DESCENDANTS : FOCUS_BEFORE_DESCENDANTS);
-            if (!open) full.clearFocus();
-            else summary.clearFocus();
+        void setUncoveredHeight(int value) {
+            uncoveredHeight = value;
+            boolean allVisible = value >= getMeasuredHeight();
+            details.setImportantForAccessibility(allVisible ? IMPORTANT_FOR_ACCESSIBILITY_AUTO : IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+            details.setDescendantFocusability(allVisible ? FOCUS_BEFORE_DESCENDANTS : FOCUS_BLOCK_DESCENDANTS);
+            if (!allVisible) details.clearFocus();
         }
 
-        @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-            super.onLayout(changed, left, top, right, bottom);
-            setClipBounds(new Rect(0, 0, getWidth(), exposedHeight()));
-        }
-
-        private boolean insideExposure(MotionEvent event) {
-            return event.getX() >= 0 && event.getX() < getWidth() && event.getY() >= 0 && event.getY() < exposedHeight();
+        private boolean insideVisibleCard(MotionEvent event) {
+            return event.getX() >= 0 && event.getX() < getWidth() && event.getY() >= 0 && event.getY() < visibleHeight();
         }
 
         @Override public boolean dispatchTouchEvent(MotionEvent event) {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
-                if (!insideExposure(event)) return false;
-                compactGesture = !fullyOpen();
-                summaryGesture = clippedGesture = false;
+                if (!insideVisibleCard(event)) return false;
+                cancelledGesture = false;
             }
-            if (!compactGesture) return super.dispatchTouchEvent(event);
-            if (clippedGesture) return true;
-            if (action != MotionEvent.ACTION_CANCEL && !insideExposure(event)) {
+            if (cancelledGesture) return true;
+            if (action != MotionEvent.ACTION_CANCEL && !insideVisibleCard(event)) {
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
-                if (summaryGesture) summary.dispatchTouchEvent(cancel);
-                else super.onTouchEvent(cancel);
+                super.dispatchTouchEvent(cancel);
                 cancel.recycle();
-                clippedGesture = true;
+                cancelledGesture = true;
                 return true;
             }
-            // 叠放/过渡只分发到可见摘要；后方完整卡即使同坐标有按钮也收不到触摸。
-            if (action == MotionEvent.ACTION_DOWN) summaryGesture = summary.dispatchTouchEvent(event);
-            else if (summaryGesture) summary.dispatchTouchEvent(event);
-            return summaryGesture || super.onTouchEvent(event);
+            return super.dispatchTouchEvent(event);
         }
+
+        @Override public boolean onInterceptTouchEvent(MotionEvent event) {
+            // 过渡中只有部分露出的详情控件不抢点击；头部切换按钮始终独立。
+            return visibleHeight() < getMeasuredHeight() && event.getY() >= detailsTop()
+                || super.onInterceptTouchEvent(event);
+        }
+
+        @Override public void getFocusedRect(Rect bounds) { bounds.set(0, 0, getWidth(), visibleHeight()); }
 
         @Override public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
             super.onInitializeAccessibilityNodeInfo(info);
             Rect bounds = new Rect();
             info.getBoundsInParent(bounds);
-            bounds.bottom = bounds.top + exposedHeight();
+            bounds.bottom = bounds.top + visibleHeight();
             info.setBoundsInParent(bounds);
             info.getBoundsInScreen(bounds);
-            bounds.bottom = Math.min(bounds.bottom, bounds.top + exposedHeight());
+            bounds.bottom = Math.min(bounds.bottom, bounds.top + visibleHeight());
             info.setBoundsInScreen(bounds);
         }
     }
