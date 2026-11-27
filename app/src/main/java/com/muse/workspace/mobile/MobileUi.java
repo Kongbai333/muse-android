@@ -39,6 +39,14 @@ import java.util.function.IntConsumer;
  */
 final class MobileUi {
     static int BG, SURFACE, RAISED, LINE, LINE_STRONG, INK, TEXT2, MUTED, ACCENT, ON_ACCENT, ACCENT_SOFT, SCRIM, PROGRESS;
+    /** 额度色阶：已用 0 / 45 / 65 / 82 / 95% 五个色标。 */
+    static int Q0, Q1, Q2, Q3, Q4;
+    /** 元数据等宽字：JetBrains Mono（res/font，SIL OFL 1.1）；读取失败时退回系统等宽字。 */
+    static Typeface MONO, MONO_MEDIUM;
+    /** 圆角三档：标签与小控件 / 卡片、图片、按钮 / 托盘、侧栏、弹窗。 */
+    static final int R_SM = 6, R_MD = 12, R_LG = 20;
+    private static final float[] QUOTA_STOPS = {0f, 45f, 65f, 82f, 95f};
+    private static final android.animation.ArgbEvaluator BLEND = new android.animation.ArgbEvaluator();
     static boolean NIGHT = true;
     static final String PREFS = "muse-ui";
     private static final String THEME_KEY = "theme-darkroom";
@@ -67,6 +75,20 @@ final class MobileUi {
         ON_ACCENT = context.getColor(R.color.muse_on_accent);
         ACCENT_SOFT = context.getColor(R.color.muse_accent_soft);
         SCRIM = context.getColor(R.color.muse_scrim);
+        Q0 = context.getColor(R.color.muse_quota_0);
+        Q1 = context.getColor(R.color.muse_quota_1);
+        Q2 = context.getColor(R.color.muse_quota_2);
+        Q3 = context.getColor(R.color.muse_quota_3);
+        Q4 = context.getColor(R.color.muse_quota_4);
+        if (MONO == null) {
+            try {
+                MONO = context.getResources().getFont(R.font.jetbrains_mono_regular);
+                MONO_MEDIUM = context.getResources().getFont(R.font.jetbrains_mono_medium);
+            } catch (RuntimeException unavailable) {
+                MONO = Typeface.MONOSPACE;
+                MONO_MEDIUM = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD);
+            }
+        }
         NIGHT = (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
             == Configuration.UI_MODE_NIGHT_YES;
     }
@@ -94,11 +116,57 @@ final class MobileUi {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(THEME_MODE_KEY, mode.stored).remove(THEME_KEY).apply();
         applyNightMode(context);
+        syncSplashNightMode(context);
+    }
+
+    private static final String SPLASH_NIGHT_KEY = "splash-night";
+
+    /**
+     * Android 12+ 的系统启动画面在应用代码运行前就画出来，只认系统记住的应用夜间模式。
+     * 把暗房 / 白昼同步给系统，下次冷启动的启动画面就和应用主题一致；只在变化时调用一次。
+     */
+    static void syncSplashNightMode(Context context) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return;
+        SharedPreferences preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        int mode = switch (themeMode(context)) {
+            case LIGHT -> android.app.UiModeManager.MODE_NIGHT_NO;
+            case DARK -> android.app.UiModeManager.MODE_NIGHT_YES;
+            case SYSTEM -> android.app.UiModeManager.MODE_NIGHT_AUTO;
+        };
+        if (preferences.getInt(SPLASH_NIGHT_KEY, -1) == mode) return;
+        android.app.UiModeManager modes = context.getSystemService(android.app.UiModeManager.class);
+        if (modes == null) return;
+        try {
+            modes.setApplicationNightMode(mode);
+            preferences.edit().putInt(SPLASH_NIGHT_KEY, mode).apply();
+        } catch (RuntimeException ignored) {
+            // 个别定制系统不支持：启动画面退回跟随系统深浅色，不影响应用本身。
+        }
+    }
+
+    /** 已用额度对应的颜色：在五个色标之间连续插值；未知或已用完为灰色。 */
+    static int quotaColor(Double used) {
+        if (used == null || used.isNaN() || used >= 100) return MUTED;
+        float value = (float) Math.max(0, Math.min(99.9, used));
+        int[] tones = {Q0, Q1, Q2, Q3, Q4};
+        if (value >= QUOTA_STOPS[QUOTA_STOPS.length - 1]) return tones[tones.length - 1];
+        for (int index = 1; index < QUOTA_STOPS.length; index++) {
+            if (value < QUOTA_STOPS[index]) {
+                float fraction = (value - QUOTA_STOPS[index - 1]) / (QUOTA_STOPS[index] - QUOTA_STOPS[index - 1]);
+                return (int) BLEND.evaluate(fraction, tones[index - 1], tones[index]);
+            }
+        }
+        return tones[0];
+    }
+
+    /** 额度状态的文字说明，与色标一一对应。 */
+    static String quotaLevel(double used) {
+        return used >= 100 ? "已用完" : used >= 95 ? "将尽" : used >= 82 ? "告急" : used >= 65 ? "偏紧" : used >= 45 ? "正常" : "充足";
     }
 
     static int themeIcon(Context context) {
         return switch (themeMode(context)) {
-            case LIGHT -> R.drawable.ic_theme_light;
+            case LIGHT -> R.drawable.ic_sun;
             case DARK -> R.drawable.ic_theme;
             case SYSTEM -> R.drawable.ic_theme_system;
         };
@@ -112,7 +180,7 @@ final class MobileUi {
     static MaterialAlertDialogBuilder dialog(Context context) {
         MobileUi ui = new MobileUi(context);
         MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(context, R.style.MuseDialog);
-        builder.setBackground(ui.shape(SURFACE, 18, LINE));
+        builder.setBackground(ui.shape(SURFACE, R_LG, LINE));
         return builder;
     }
 
@@ -167,6 +235,22 @@ final class MobileUi {
         TextView view = text(text, size, color, true);
         view.setFontFeatureSettings("tnum");
         view.setLetterSpacing(-0.01f);
+        return view;
+    }
+
+    /** 元数据：等宽字、略加字距，像底片边缘的字码（画幅、时间、额度、网络）。 */
+    TextView meta(String text, float size, int color) {
+        TextView view = text(text, size, color, false);
+        view.setTypeface(MONO);
+        view.setFontFeatureSettings("tnum");
+        view.setLetterSpacing(0.04f);
+        return view;
+    }
+
+    /** 加重的元数据：百分比、协议、角标。 */
+    TextView metaStrong(String text, float size, int color) {
+        TextView view = meta(text, size, color);
+        view.setTypeface(MONO_MEDIUM);
         return view;
     }
 
@@ -235,11 +319,12 @@ final class MobileUi {
         button.setMinHeight(dp(46));
         button.setMinimumHeight(dp(46));
         pad(button, 14, 6);
-        touch(button, color, 9, border, action);
+        touch(button, color, R_MD, border, action);
         return button;
     }
 
-    TextView primary(String label, Runnable action) { return button(label, ACCENT, ON_ACCENT, 0, action); }
+    /** 主按钮：墨色实底。强调色只留给“生成”。 */
+    TextView primary(String label, Runnable action) { return button(label, INK, BG, 0, action); }
 
     TextView outline(String label, Runnable action) { return button(label, Color.TRANSPARENT, INK, LINE_STRONG, action); }
 
@@ -273,7 +358,7 @@ final class MobileUi {
         field.setTextColor(INK);
         field.setHintTextColor(MUTED);
         field.setTextSize(15);
-        field.setBackground(shape(BG, 8, LINE));
+        field.setBackground(shape(RAISED, R_MD, 0));
         field.setPadding(dp(14), 0, dp(14), 0);
         field.setMinHeight(dp(48));
         field.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});
@@ -358,7 +443,7 @@ final class MobileUi {
         button.setImageResource(busy ? R.drawable.ic_stop : R.drawable.ic_send);
         button.setImageTintList(ColorStateList.valueOf(busy ? INK : ON_ACCENT));
         int color = busy ? RAISED : ACCENT;
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(busy ? ripple() : 0x33FFFFFF), shape(color, 10, 0), null));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(busy ? ripple() : 0x33FFFFFF), shape(color, 23, 0), null));
         button.setAlpha(busy || ready ? 1f : 0.45f);
     }
 
@@ -384,8 +469,9 @@ final class MobileUi {
         String initial = name == null || name.isEmpty() ? "M" : name.substring(0, name.offsetByCodePoints(0, 1));
         int position = key == null ? -1 : ACCOUNT_ORDER.indexOf(key);
         int tone = position >= 0 ? position % 4 : Math.abs(key == null ? 0 : key.hashCode()) % 4;
-        int background = tone == 0 ? ACCENT : tone == 1 ? INK : tone == 2 ? RAISED : Color.TRANSPARENT;
-        int foreground = tone == 0 ? ON_ACCENT : tone == 1 ? BG : INK;
+        // 强调色只留给“生成”：头像在墨色、浅灰、灰字、描边四种之间轮换。
+        int background = tone == 0 ? INK : tone == 1 ? RAISED : tone == 2 ? TEXT2 : Color.TRANSPARENT;
+        int foreground = tone == 0 || tone == 2 ? BG : INK;
         TextView view = figure(initial.toUpperCase(java.util.Locale.ROOT), sizeDp * 0.38f, foreground);
         view.setGravity(Gravity.CENTER);
         GradientDrawable circle = new GradientDrawable();
@@ -401,7 +487,7 @@ final class MobileUi {
     TextView tag(String value) {
         TextView tag = figure(value, 10.5f, TEXT2);
         single(tag);
-        tag.setBackground(shape(Color.TRANSPARENT, 5, LINE_STRONG));
+        tag.setBackground(shape(Color.TRANSPARENT, 4, LINE_STRONG));
         tag.setPadding(dp(6), dp(2), dp(6), dp(2));
         return tag;
     }
@@ -414,21 +500,22 @@ final class MobileUi {
 
         Segment(String[] labels, int[] icons, boolean fill, IntConsumer change) {
             view = row();
-            view.setBackground(shape(RAISED, 9, 0));
+            view.setBackground(shape(RAISED, 8, 0));
             pad(view, 3, 3);
             items = new TextView[labels.length];
             for (int index = 0; index < labels.length; index++) {
                 int position = index;
                 TextView item = text(labels[index], 13, TEXT2, false);
                 item.setGravity(Gravity.CENTER);
-                item.setPadding(dp(13), 0, dp(13), 0);
+                boolean iconOnly = labels[index].isEmpty();
+                item.setPadding(dp(iconOnly ? 7 : 13), 0, dp(iconOnly ? 7 : 13), 0);
                 if (icons != null && icons[index] != 0) {
                     Drawable drawable = context.getDrawable(icons[index]);
                     if (drawable != null) {
                         drawable = drawable.mutate();
                         drawable.setBounds(0, 0, dp(15), dp(15));
                         item.setCompoundDrawablesRelative(drawable, null, null, null);
-                        item.setCompoundDrawablePadding(dp(6));
+                        item.setCompoundDrawablePadding(iconOnly ? 0 : dp(6));
                     }
                 }
                 item.setFocusable(true);
@@ -448,7 +535,7 @@ final class MobileUi {
                 TextView item = items[i];
                 item.setTextColor(on ? INK : TEXT2);
                 item.setTypeface(Typeface.create(on ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
-                item.setBackground(on ? shape(SURFACE, 6, LINE) : null);
+                item.setBackground(on ? shape(BG, 6, 0) : null);
                 item.setSelected(on);
                 Drawable[] drawables = item.getCompoundDrawablesRelative();
                 if (drawables[0] != null) drawables[0].setTint(on ? INK : TEXT2);
@@ -456,6 +543,12 @@ final class MobileUi {
         }
 
         void setLabel(int index, String label) { items[index].setText(label); }
+
+        /** 只有图标的分段：给读屏和长按提示用的说明。 */
+        void describe(int index, String label) {
+            items[index].setContentDescription(label);
+            items[index].setTooltipText(label);
+        }
     }
 
     Segment segment(String[] labels, int[] icons, boolean fill, int selected, IntConsumer change) {
@@ -466,6 +559,11 @@ final class MobileUi {
 
     /** 输入框下方的参数按钮：账号、画幅、时长。 */
     LinearLayout chip(View lead, String value, String label, Runnable action) {
+        return chip(lead, value, label, true, action);
+    }
+
+    /** 参数按钮；chevron 为 false 时不画下拉箭头，省出底栏宽度。 */
+    LinearLayout chip(View lead, String value, String label, boolean chevron, Runnable action) {
         LinearLayout chip = row();
         chip.setPadding(dp(9), 0, dp(8), 0);
         chip.setContentDescription(label);
@@ -479,11 +577,13 @@ final class MobileUi {
         TextView text = single(text(value, 13, INK, false));
         text.setMaxWidth(dp(86));
         chip.addView(text, new LinearLayout.LayoutParams(-2, -2));
-        View chevron = iconView(R.drawable.ic_chevron_down, TEXT2, 13);
-        LinearLayout.LayoutParams chevronPosition = new LinearLayout.LayoutParams(dp(13), dp(13));
-        chevronPosition.setMarginStart(dp(5));
-        chip.addView(chevron, chevronPosition);
-        touch(chip, RAISED, 7, LINE, action);
+        if (chevron) {
+            View arrow = iconView(R.drawable.ic_chevron_down, TEXT2, 13);
+            LinearLayout.LayoutParams chevronPosition = new LinearLayout.LayoutParams(dp(13), dp(13));
+            chevronPosition.setMarginStart(dp(5));
+            chip.addView(arrow, chevronPosition);
+        } else chip.setPadding(dp(9), 0, dp(9), 0);
+        touch(chip, RAISED, R_SM, 0, action);
         chip.setTag(text);
         return chip;
     }
@@ -534,7 +634,7 @@ final class MobileUi {
         GradientDrawable ring = new GradientDrawable();
         ring.setShape(GradientDrawable.OVAL);
         ring.setColor(Color.TRANSPARENT);
-        ring.setStroke(dp(selected ? 6 : 1.5f), selected ? ACCENT : LINE_STRONG);
+        ring.setStroke(dp(selected ? 6 : 1.5f), selected ? INK : LINE_STRONG);
         mark.setBackground(ring);
         LinearLayout.LayoutParams markPosition = new LinearLayout.LayoutParams(dp(20), dp(20));
         markPosition.setMarginStart(dp(10));
@@ -542,15 +642,15 @@ final class MobileUi {
         row.setSelected(selected);
         row.setEnabled(enabled);
         row.setAlpha(enabled ? 1f : 0.42f);
-        if (enabled) touch(row, selected ? ACCENT_SOFT : Color.TRANSPARENT, 10, selected ? ACCENT : LINE, action);
-        else row.setBackground(shape(Color.TRANSPARENT, 10, LINE));
+        if (enabled) touch(row, selected ? RAISED : Color.TRANSPARENT, R_MD, selected ? LINE_STRONG : LINE, action);
+        else row.setBackground(shape(Color.TRANSPARENT, R_MD, LINE));
         return row;
     }
 
     /** 提示块：普通 / 通过 / 警告。 */
     TextView note(String message, int kind) {
         TextView note = text(message, 13, kind == 0 ? TEXT2 : INK, false);
-        note.setBackground(shape(kind == 2 ? ACCENT_SOFT : RAISED, 9, LINE));
+        note.setBackground(shape(kind == 2 ? ACCENT_SOFT : RAISED, R_MD, 0));
         note.setPadding(dp(12), dp(11), dp(12), dp(11));
         return note;
     }
@@ -574,7 +674,7 @@ final class MobileUi {
                 }
             };
             LinearLayout panel = column();
-            panel.setBackground(topShape(SURFACE, 20));
+            panel.setBackground(topShape(SURFACE, R_LG));
             panel.setPadding(dp(18), 0, dp(18), dp(22));
             FrameLayout grab = new FrameLayout(activity);
             View handle = new View(activity);
@@ -659,7 +759,7 @@ final class MobileUi {
 
     Sheet sheet(Activity activity, String title, String subtitle) { return new Sheet(activity, title, subtitle); }
 
-    /** 周额度刻度条：20 格，≥80% 时已用格为强调色；不限量时整条为浅色。 */
+    /** 周额度刻度条：20 格，已用格按额度色阶着色；不限量时整条为浅色。 */
     View tickBar() { return new TickBar(context); }
 
     static void setTicks(View bar, Double used, boolean known) {
@@ -667,18 +767,23 @@ final class MobileUi {
     }
 
     static void tintTicks(View bar, int progress, int empty, int hot) {
-        if (bar instanceof TickBar ticks) { ticks.progressColor=progress; ticks.emptyColor=empty; ticks.unknownColor=empty; ticks.hotColor=hot; ticks.invalidate(); }
+        if (bar instanceof TickBar ticks) { ticks.tinted=true; ticks.progressColor=progress; ticks.emptyColor=empty; ticks.unknownColor=empty; ticks.hotColor=hot; ticks.invalidate(); }
     }
 
     private final class TickBar extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Double used;
-        private boolean known;
+        private boolean known, tinted;
         private int progressColor = PROGRESS, emptyColor = LINE_STRONG, hotColor = ACCENT, unknownColor = LINE;
 
         TickBar(Context context) { super(context); }
 
-        void set(Double value, boolean measured) { used = value; known = measured; invalidate(); }
+        void set(Double value, boolean measured) {
+            used = value;
+            known = measured;
+            if (!tinted) progressColor = hotColor = quotaColor(value);
+            invalidate();
+        }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);

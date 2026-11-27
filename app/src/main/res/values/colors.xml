@@ -1,18 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 白昼：浅色主题。暗房色板见 values-night/colors.xml。 -->
-    <color name="muse_bg">#FFF5F6F2</color>
-    <color name="muse_surface">#FFFDFEFB</color>
-    <color name="muse_raised">#FFE9EDE5</color>
-    <color name="muse_line">#FFD9E0D7</color>
-    <color name="muse_line_strong">#FFC2CEC1</color>
-    <color name="muse_text">#FF202E27</color>
-    <color name="muse_text2">#FF506056</color>
-    <color name="muse_muted">#FF647269</color>
-    <color name="muse_accent">#FF275A46</color>
+    <color name="muse_bg">#FFF4F3F0</color>
+    <color name="muse_surface">#FFFFFFFF</color>
+    <color name="muse_raised">#FFEAE8E4</color>
+    <color name="muse_line">#14161513</color>
+    <color name="muse_line_strong">#29161513</color>
+    <color name="muse_text">#FF161513</color>
+    <color name="muse_text2">#FF5F5B54</color>
+    <color name="muse_muted">#FF8A857C</color>
+    <color name="muse_accent">#FFE2431E</color>
+    <color name="muse_on_accent">#FFFFFFFF</color>
+    <color name="muse_accent_soft">#1AE2431E</color>
+    <color name="muse_scrim">#57161513</color>
     <color name="muse_progress">#FF426B53</color>
-    <color name="muse_on_accent">#FFFFFDF3</color>
-    <color name="muse_accent_soft">#FFE2ECE2</color>
-    <color name="muse_scrim">#3813231E</color>
     <color name="muse_chrome">@color/muse_bg</color>
+    <!-- 额度色阶：已用 0 / 45 / 65 / 82 / 95%，之间连续插值。白底上均 ≥ 3.4:1。 -->
+    <color name="muse_quota_0">#FF16865A</color>
+    <color name="muse_quota_1">#FF5E8A12</color>
+    <color name="muse_quota_2">#FFA06F00</color>
+    <color name="muse_quota_3">#FFC9520E</color>
+    <color name="muse_quota_4">#FFCC2E1C</color>
+    <!-- 启动（Android 8–11）：系统此时还不知道应用选的主题，固定用暗房色，避免白闪。 -->
+    <color name="muse_launch_bg">#FF0C0B0A</color>
+    <color name="muse_launch_ink">#FFF2EEE6</color>
+    <color name="muse_launch_accent">#FFFF5A36</color>
 </resources>

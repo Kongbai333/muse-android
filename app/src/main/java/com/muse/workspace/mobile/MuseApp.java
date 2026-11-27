@@ -8,5 +8,6 @@ public final class MuseApp extends Application {
         super.onCreate();
         CrashReport.install(this);
         MobileUi.applyNightMode(this);
+        MobileUi.syncSplashNightMode(this);
     }
 }

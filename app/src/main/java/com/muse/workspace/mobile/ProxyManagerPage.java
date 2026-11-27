@@ -1,7 +1,6 @@
 package com.muse.workspace.mobile;
 
 import android.content.Context;
-import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -56,7 +55,7 @@ final class ProxyManagerPage extends LinearLayout {
 
     static TextView protocolTag(MobileUi ui, String scheme) {
         TextView protocol = ui.text(scheme.toUpperCase(java.util.Locale.ROOT), 10.5f, INK, true);
-        protocol.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        protocol.setTypeface(MobileUi.MONO_MEDIUM);
         protocol.setGravity(Gravity.CENTER);
         protocol.setBackground(ui.shape(ACCENT_SOFT, 7, LINE));
         protocol.setPadding(0, ui.dp(5), 0, ui.dp(5));
@@ -74,7 +73,7 @@ final class ProxyManagerPage extends LinearLayout {
         words.addView(ui.single(ui.text(profile.name, 14.5f, INK, true)));
         String address = (profile.host.indexOf(':') >= 0 ? "[" + profile.host + "]" : profile.host) + ":" + profile.port;
         TextView endpoint = ui.single(ui.text(address, 12, TEXT2, false));
-        endpoint.setTypeface(Typeface.MONOSPACE);
+        endpoint.setTypeface(MobileUi.MONO);
         LinearLayout.LayoutParams endpointPosition = new LinearLayout.LayoutParams(-1, -2);
         endpointPosition.topMargin = ui.dp(5);
         words.addView(endpoint, endpointPosition);

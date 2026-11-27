@@ -7,4 +7,11 @@
     <style name="MuseSheet" parent="MuseBaseSheet">
         <item name="android:windowLightNavigationBar">@bool/muse_light_bars</item>
     </style>
+    <style name="MuseLaunch" parent="MuseTheme">
+        <item name="android:windowBackground">@drawable/launch_window</item>
+        <item name="android:statusBarColor">@color/muse_launch_bg</item>
+        <item name="android:navigationBarColor">@color/muse_launch_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
 </resources>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+：系统启动画面。应用的暗房 / 白昼已通过 UiModeManager 同步给系统，所以这里跟随主题色。 -->
+    <style name="MuseLaunch" parent="MuseTheme">
+        <item name="android:windowBackground">@color/muse_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/muse_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
+        <item name="android:statusBarColor">@color/muse_bg</item>
+        <item name="android:navigationBarColor">@color/muse_bg</item>
+        <item name="android:windowLightStatusBar">@bool/muse_light_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/muse_light_bars</item>
+    </style>
+</resources>

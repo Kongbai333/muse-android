@@ -32,9 +32,16 @@
         <item name="bottomSheetDialogTheme">@style/MuseSheet</item>
     </style>
     <style name="MuseTheme" parent="MuseBaseTheme" />
+    <!-- 启动主题：只用于启动窗口，Activity 在 onCreate 里换回 MuseTheme。 -->
+    <style name="MuseLaunch" parent="MuseTheme">
+        <item name="android:windowBackground">@drawable/launch_window</item>
+        <item name="android:statusBarColor">@color/muse_launch_bg</item>
+        <item name="android:navigationBarColor">@color/muse_launch_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
     <style name="MuseDialogShape" parent="ShapeAppearance.Material3.MediumComponent">
         <item name="cornerFamily">rounded</item>
-        <item name="cornerSize">18dp</item>
+        <item name="cornerSize">20dp</item>
     </style>
     <style name="MuseDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorSurface">@color/muse_surface</item>
@@ -52,7 +59,7 @@
     </style>
     <style name="MuseDialogButton" parent="Widget.Material3.Button.TextButton">
         <item name="android:textColor">@color/muse_text</item>
-        <item name="cornerRadius">10dp</item>
+        <item name="cornerRadius">12dp</item>
     </style>
     <style name="MuseBaseSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
         <item name="bottomSheetStyle">@style/MuseSheetStyle</item>

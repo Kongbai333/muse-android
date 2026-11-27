@@ -3,7 +3,6 @@ package com.muse.workspace.mobile;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.graphics.Typeface;
 import android.text.InputType;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -29,9 +28,9 @@ final class ProxyEditor {
         if (existing != null) title.setText(existing.name);
         EditText host = ui.input("127.0.0.1", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI
             | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 280);
-        host.setTypeface(Typeface.MONOSPACE);
+        host.setTypeface(MobileUi.MONO);
         EditText port = ui.input("端口", InputType.TYPE_CLASS_NUMBER, 5);
-        port.setTypeface(Typeface.MONOSPACE);
+        port.setTypeface(MobileUi.MONO);
         EditText user = ui.input("可选", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 1024);
         EditText pass = ui.input("可选", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, 4096);
         port.setText(defaultPorts[initial]);

@@ -1,5 +1,6 @@
 package com.muse.workspace.mobile;
 
+import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.Dialog;
@@ -142,10 +143,21 @@ final class StudioResults {
         final TextView reply;
         final AspectFrame media;
         final ImageView image;
-        final LinearLayout overlay, stopped;
+        final FrameLayout overlay;
+        final LinearLayout stopped;
+        final View glow;
         final TextView step, stoppedText;
         File currentFile;
-        boolean wasRunning, initialized, developed;
+        boolean wasRunning, initialized, developed, ticking;
+        String stepText = "";
+        ObjectAnimator pulse;
+        // 显影计时：每秒刷新一次，离开屏幕即停。
+        final Runnable tick = new Runnable() {
+            @Override public void run() {
+                updateClock();
+                if (ticking && media.isAttachedToWindow()) media.postDelayed(this, 1000);
+            }
+        };
 
         Result(MobileStudio.Entry entry, boolean thumbnail) {
             this.entry = entry;
@@ -155,31 +167,63 @@ final class StudioResults {
             media = new AspectFrame(activity);
             float[] ratio = MobileUi.ratioValue(entry.ratio);
             media.setRatio(ratio[0], ratio[1]);
-            media.setBackground(ui.shape(RAISED, 9, LINE));
+            media.setBackground(ui.shape(NIGHT ? 0xFF050505 : RAISED, R_MD, 0));
             media.setClipToOutline(true);
             image = new ImageView(activity);
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
             image.setVisibility(View.GONE);
             media.addView(image, new FrameLayout.LayoutParams(-1, -1));
 
-            overlay = ui.column();
-            overlay.setBackground(ui.shape(0xCC1B211E, 8, 0));
-            overlay.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(11));
-            step = ui.single(ui.text("", 12.5f, 0xFFF1EFEA, false));
-            overlay.addView(step);
+            // 显影中：整块暗房底色，底部一团安全灯红光缓慢呼吸；中间等宽字「显影中」、步骤与计时；底边一条进度线。
+            // 白昼主题也保持暗房，和结果出来后的“显影”动画接得上。
+            overlay = new FrameLayout(activity);
+            overlay.setBackgroundColor(0xFF0A0908);
+            glow = new View(activity);
+            android.graphics.drawable.GradientDrawable light = new android.graphics.drawable.GradientDrawable();
+            light.setGradientType(android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT);
+            light.setColors(new int[]{androidx.core.graphics.ColorUtils.setAlphaComponent(ACCENT, 0x5C),
+                androidx.core.graphics.ColorUtils.setAlphaComponent(ACCENT, 0x1A), 0x00000000});
+            light.setGradientCenter(0.5f, 1.12f);
+            light.setGradientRadius(ui.dp(300));
+            glow.setBackground(light);
+            overlay.addView(glow, new FrameLayout.LayoutParams(-1, -1));
+
+            LinearLayout label = ui.column();
+            label.setGravity(Gravity.CENTER_HORIZONTAL);
+            TextView title = ui.metaStrong("显影中", 11, ACCENT);
+            title.setLetterSpacing(0.32f);
+            title.setPadding(ui.dp(4), 0, 0, 0); // 字距留在末尾，补到左边保持居中
+            label.addView(title);
+            step = ui.single(ui.meta("", 10, 0x99F2EEE6));
+            step.setGravity(Gravity.CENTER);
+            step.setMaxWidth(ui.dp(260));
+            LinearLayout.LayoutParams stepPosition = new LinearLayout.LayoutParams(-2, -2);
+            stepPosition.topMargin = ui.dp(10);
+            label.addView(step, stepPosition);
+            overlay.addView(label, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+
             LinearProgressIndicator progress = new LinearProgressIndicator(activity);
             progress.setIndeterminate(true);
             progress.setIndicatorColor(ACCENT);
-            progress.setTrackColor(0x29FFFFFF);
-            progress.setTrackThickness(ui.dp(3));
-            progress.setTrackCornerRadius(ui.dp(2));
-            LinearLayout.LayoutParams progressPosition = new LinearLayout.LayoutParams(-1, -2);
-            progressPosition.topMargin = ui.dp(9);
-            overlay.addView(progress, progressPosition);
-            FrameLayout.LayoutParams overlayPosition = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
-            overlayPosition.setMargins(ui.dp(12), 0, ui.dp(12), ui.dp(12));
+            progress.setTrackColor(0x14FFFFFF);
+            progress.setTrackThickness(ui.dp(2));
+            progress.setTrackCornerRadius(0);
+            overlay.addView(progress, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+            overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
             overlay.setVisibility(View.GONE);
-            media.addView(overlay, overlayPosition);
+            media.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
+            media.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+                @Override public void onViewAttachedToWindow(View view) {
+                    if (!ticking) return;
+                    media.removeCallbacks(tick);
+                    media.post(tick);
+                    startPulse();
+                }
+                @Override public void onViewDetachedFromWindow(View view) {
+                    media.removeCallbacks(tick);
+                    stopPulse();
+                }
+            });
 
             stopped = ui.column();
             stopped.setGravity(Gravity.CENTER);
@@ -202,10 +246,13 @@ final class StudioResults {
             LinearLayout meta = ui.row();
             String stamp = new SimpleDateFormat("M/d HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(entry.created));
             String aspect = "Auto".equals(entry.ratio) ? "自动画幅" : entry.ratio;
-            String kind = (entry.video ? "视频" : "图片") + " · " + aspect + (entry.video ? " · " + entry.seconds + " 秒" : "")
-                + " · " + entry.name;
-            meta.addView(ui.single(ui.text(kind, 12, MUTED, false)), new LinearLayout.LayoutParams(0, -2, 1));
-            TextView time = ui.figure(stamp, 12, MUTED);
+            // 底片边码：IMG / VID · 画幅 · 时长 · 账号；读屏仍读中文。
+            String code = (entry.video ? "VID" : "IMG") + " · " + ("Auto".equals(entry.ratio) ? "AUTO" : entry.ratio)
+                + (entry.video ? " · " + entry.seconds + "S" : "") + " · " + entry.name;
+            meta.setContentDescription((entry.video ? "视频" : "图片") + "，" + aspect + (entry.video ? "，" + entry.seconds + " 秒" : "")
+                + "，" + entry.name + "，" + stamp);
+            meta.addView(ui.single(ui.meta(code, 10.5f, MUTED)), new LinearLayout.LayoutParams(0, -2, 1));
+            TextView time = ui.meta(stamp, 10.5f, MUTED);
             LinearLayout.LayoutParams timePosition = new LinearLayout.LayoutParams(-2, -2);
             timePosition.setMarginStart(ui.dp(10));
             meta.addView(time, timePosition);
@@ -222,9 +269,10 @@ final class StudioResults {
             boolean running = studio.running() == entry;
             File file = studio.media(entry);
             String status = entry.status == null ? "" : entry.status;
-            if (!status.contentEquals(step.getText())) step.setText(status);
+            if (!status.equals(stepText)) { stepText = status; updateClock(); }
             if (!status.contentEquals(stoppedText.getText())) stoppedText.setText(status.isEmpty() ? "未取得结果" : status);
             overlay.setVisibility(running && file == null ? View.VISIBLE : View.GONE);
+            setDeveloping(running && file == null);
             stopped.setVisibility(!running && file == null ? View.VISIBLE : View.GONE);
             media.setContentDescription(running ? status : file == null ? status : entry.video ? "播放视频" : "查看生成图片");
             if (initialized && running == wasRunning && Objects.equals(currentFile, file)) return;
@@ -238,13 +286,25 @@ final class StudioResults {
                 addAction(ui.small("提示词", 0, true, () -> showPrompt(entry)));
                 return;
             }
-            if (file != null) {
-                addAction(ui.small("保存", R.drawable.ic_download, false, () -> save.accept(entry)));
-                addAction(ui.small(entry.video ? "播放" : "查看", entry.video ? R.drawable.ic_play : R.drawable.ic_expand,
-                    false, () -> preview(entry, file)));
+            // 动作只留两个常用的，其余收进「⋯」；点图片本身就是查看 / 播放。
+            if (file != null) addAction(ui.small("保存", R.drawable.ic_download, false, () -> save.accept(entry)));
+            addAction(ui.small("再编辑", R.drawable.ic_edit, true, () -> reuse.accept(entry)));
+            if (file == null) addAction(ui.small("提示词", 0, true, () -> showPrompt(entry)));
+            else {
+                View spacer = ui.spacer();
+                actions.addView(spacer);
+                TextView more = ui.small("", R.drawable.ic_more, true, () -> {
+                    String look = entry.video ? "播放视频" : "查看大图";
+                    MobileUi.dialog(activity).setItems(new String[]{look, "查看提示词"}, (dialog, which) -> {
+                        if (which == 0) preview(entry, file);
+                        else showPrompt(entry);
+                    }).show();
+                });
+                more.setCompoundDrawablePadding(0);
+                more.setPadding(ui.dp(9), 0, ui.dp(9), 0);
+                more.setContentDescription("更多：" + (entry.video ? "播放视频" : "查看大图") + "、查看提示词");
+                actions.addView(more, new LinearLayout.LayoutParams(-2, ui.dp(34)));
             }
-            addAction(ui.small("提示词", 0, true, () -> showPrompt(entry)));
-            addAction(ui.small("重新编辑", 0, true, () -> reuse.accept(entry)));
             if (file == null || !thumbnail) return;
             media.setOnClickListener(tap -> preview(entry, file));
             if (entry.video) {
@@ -267,6 +327,45 @@ final class StudioResults {
                     if (justFinished) develop();
                 });
             }
+        }
+
+        private void setDeveloping(boolean on) {
+            if (on == ticking) return;
+            ticking = on;
+            media.removeCallbacks(tick);
+            if (on) {
+                updateClock();
+                if (media.isAttachedToWindow()) media.postDelayed(tick, 1000);
+                startPulse();
+            } else stopPulse();
+        }
+
+        /** 步骤 · 已用时间，例如「正在生成 · 00:42」。 */
+        private void updateClock() {
+            long seconds = Math.max(0, (System.currentTimeMillis() - entry.created) / 1000);
+            String clock = seconds >= 3600
+                ? String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+                : String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
+            String text = stepText.isEmpty() ? clock : stepText + " · " + clock;
+            if (!text.contentEquals(step.getText())) step.setText(text);
+            overlay.setContentDescription("显影中，" + (stepText.isEmpty() ? "" : stepText + "，") + "已用 " + clock);
+        }
+
+        /** 安全灯：红光在 55%–100% 之间缓慢呼吸；系统关闭动画时保持常亮。 */
+        private void startPulse() {
+            if (pulse != null || !ticking || !media.isAttachedToWindow() || !ValueAnimator.areAnimatorsEnabled()) return;
+            pulse = ObjectAnimator.ofFloat(glow, View.ALPHA, 1f, 0.55f);
+            pulse.setDuration(1800);
+            pulse.setRepeatCount(ValueAnimator.INFINITE);
+            pulse.setRepeatMode(ValueAnimator.REVERSE);
+            pulse.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+            pulse.start();
+        }
+
+        private void stopPulse() {
+            if (pulse != null) pulse.cancel();
+            pulse = null;
+            glow.setAlpha(1f);
         }
 
         private void addAction(View button) {

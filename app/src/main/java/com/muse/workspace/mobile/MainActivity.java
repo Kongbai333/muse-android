@@ -86,7 +86,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private android.widget.PopupWindow accountMenu;
     private boolean switchTucked, switchPeeking, switchRight = true, switchLongPressed;
     private float switchY = 0.3f;
-    private TextView webTitle, webSubtitle, webNotice, studioTitle;
+    private TextView webTitle, webSubtitle, webNotice, studioTitle, studioSubtitle;
     private LinearLayout studioAccount;
     private ImageButton sidebarToggle, webBack, submitButton;
     private MobileUi.Segment studioMode;
@@ -130,6 +130,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     };
 
     @Override protected void onCreate(Bundle state) {
+        // 清单里用的是启动主题（只给启动窗口用），这里换回正式主题。
+        setTheme(R.style.MuseTheme);
         CrashReport.install(this);
         if (CrashReport.pending(this)) {
             // 上次闪退：先显示错误信息，不加载主界面。
@@ -142,6 +144,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         super.onCreate(state);
         try {
             buildInterface(state);
+            startEntrance(state == null);
         } catch (Throwable error) {
             // 启动时出错：不闪退，直接显示错误信息。
             ready = false;
@@ -241,6 +244,113 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     // 容器 60dp，里面是 54dp 的圆形头像框（四周 3dp 留给右上角的数量角标）。
     private static final int SWITCH_SIZE = 60, SWITCH_RING = 54, SWITCH_PEEK = 23, SWITCH_EDGE = 7;
 
+    private static final android.view.animation.PathInterpolator ENTER_EASE =
+        new android.view.animation.PathInterpolator(0.2f, 0.8f, 0.2f, 1f);
+
+    /**
+     * 冷启动过渡：启动标像安全灯熄灭一样缩小淡出，暗房底色退去；主界面从模糊、发暗“显影”出来，
+     * 输入托盘从底部升起，悬浮头像最后淡入。不额外拖延启动：首帧画好就开始，约 0.55 秒结束。
+     * Android 12+ 接管系统启动画面的退场；Android 8–11 用一层与启动窗口完全重合的遮罩做同样的事。
+     */
+    private void startEntrance(boolean cold) {
+        if (!cold || !android.animation.ValueAnimator.areAnimatorsEnabled()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getSplashScreen().setOnExitAnimationListener(splash -> {
+                if (isFinishing() || isDestroyed()) { splash.remove(); return; }
+                View icon = splash.getIconView();
+                if (icon != null) icon.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(220)
+                    .setInterpolator(new android.view.animation.AccelerateInterpolator(1.4f)).start();
+                splash.animate().alpha(0f).setStartDelay(80).setDuration(320).setInterpolator(ENTER_EASE)
+                    .withEndAction(splash::remove).start();
+                revealInterface();
+            });
+            return;
+        }
+        ViewGroup decor = (ViewGroup) getWindow().getDecorView();
+        FrameLayout cover = new FrameLayout(this);
+        int launch = getColor(R.color.muse_launch_bg);
+        cover.setBackgroundColor(launch);
+        cover.setClickable(true);
+        cover.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(R.drawable.launch_mark);
+        cover.addView(mark, new FrameLayout.LayoutParams(ui.dp(144), ui.dp(144), Gravity.CENTER));
+        decor.addView(cover, new FrameLayout.LayoutParams(-1, -1));
+        // 遮罩期间系统栏也保持暗房，免得白昼主题下闪一条浅色导航栏。
+        Window window = getWindow();
+        window.setNavigationBarColor(launch);
+        androidx.core.view.WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(window, window.getDecorView());
+        bars.setAppearanceLightStatusBars(false);
+        bars.setAppearanceLightNavigationBars(false);
+        Runnable restore = () -> {
+            decor.removeView(cover);
+            window.setNavigationBarColor(BG);
+            applyBarAppearance();
+        };
+        // 等主界面画完第一帧再退场。
+        root.post(() -> root.postOnAnimation(() -> {
+            if (isFinishing() || isDestroyed()) { restore.run(); return; }
+            mark.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(220)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator(1.4f)).start();
+            cover.animate().alpha(0f).setStartDelay(80).setDuration(320).setInterpolator(ENTER_EASE)
+                .withEndAction(restore).start();
+            revealInterface();
+        }));
+    }
+
+    /** 显影：模糊 14dp→0、饱和度与亮度回到正常（Android 12+）；整体上移 10dp；输入托盘升起；悬浮头像淡入。 */
+    private void revealInterface() {
+        if (main == null) return;
+        float unit = ui.dp(1);
+        boolean studioScreen = screen == STUDIO;
+        android.animation.ValueAnimator develop = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        develop.setDuration(520);
+        develop.setStartDelay(40);
+        develop.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
+        develop.addUpdateListener(value -> {
+            float progress = (float) value.getAnimatedValue();
+            main.setTranslationY((1f - progress) * 10 * unit);
+            if (studioScreen && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                float radius = Math.max(0.01f, 14 * unit * (1f - progress));
+                android.graphics.ColorMatrix color = new android.graphics.ColorMatrix();
+                color.setSaturation(0.2f + 0.8f * progress);
+                float light = 0.55f + 0.45f * progress;
+                android.graphics.ColorMatrix scale = new android.graphics.ColorMatrix();
+                scale.setScale(light, light, light, 1f);
+                color.postConcat(scale);
+                main.setRenderEffect(android.graphics.RenderEffect.createChainEffect(
+                    android.graphics.RenderEffect.createColorFilterEffect(new android.graphics.ColorMatrixColorFilter(color)),
+                    android.graphics.RenderEffect.createBlurEffect(radius, radius, android.graphics.Shader.TileMode.CLAMP)));
+            }
+        });
+        develop.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                main.setTranslationY(0f);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) main.setRenderEffect(null);
+            }
+        });
+        develop.start();
+
+        View tray = studioComposer;
+        if (tray != null) {
+            tray.setTranslationY(28 * unit);
+            tray.animate().translationY(0f).setStartDelay(120).setDuration(460).setInterpolator(ENTER_EASE)
+                .withEndAction(() -> tray.setTranslationY(0f)).start();
+        }
+        View bubble = quickSwitch;
+        if (bubble != null && bubble.getVisibility() == View.VISIBLE) {
+            // 不用 animate()：摆放悬浮头像时会 cancel 它的属性动画。
+            android.animation.ObjectAnimator fade = android.animation.ObjectAnimator.ofFloat(bubble, View.ALPHA, 0f, 1f);
+            fade.setStartDelay(320);
+            fade.setDuration(240);
+            fade.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator animation) { bubble.setAlpha(1f); }
+            });
+            bubble.setAlpha(0f);
+            fade.start();
+        }
+    }
+
     private FrameLayout buildQuickSwitch() {
         FrameLayout bubble = new FrameLayout(this);
         bubble.setClipChildren(false);
@@ -312,6 +422,15 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         quickSwitchPhoto.setVisibility(photo == null ? View.GONE : View.VISIBLE);
         int usable = 0;
         for (AccountStore.Account item : accounts.all()) if (accounts.usable(item, multiProfile) && !exhausted(item)) usable++;
+        // 头像外圈：当前账号的额度颜色，一眼看出还剩多少。
+        if (quickSwitchInitial.getParent() instanceof View ring
+            && ring.getBackground() instanceof android.graphics.drawable.GradientDrawable disc) {
+            AccountQuota quota = account == null || quotas == null ? null : quotas.value(account.id);
+            long now = System.currentTimeMillis();
+            boolean known = quota != null && quota.currentWeek(now);
+            int tone = !known ? LINE_STRONG : quota.used() == null ? Q0 : MobileUi.quotaColor(quota.used());
+            disc.setStroke(ui.dp(known ? 2 : 1), tone);
+        }
         quickSwitchCount.setText(String.valueOf(usable));
         quickSwitchCount.setVisibility(usable > 1 && (!switchTucked || switchPeeking) ? View.VISIBLE : View.GONE);
         String label = "快速切换 Muse 账号 · 当前：" + name + (switchTucked && !switchPeeking ? "（已收起，点按展开）" : "")
@@ -782,6 +901,28 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         else if (select(account)) showScreen(WEB);
     }
 
+    /** 侧栏叠放里点一条账号：切过去但留在侧栏，卡片由叠放自己做动画。 */
+    @Override public boolean switchAccount(AccountStore.Account account) {
+        if (account == null) return false;
+        if (account == current()) return true;
+        if (!accounts.usable(account, multiProfile)) return false;
+        if (screen == STUDIO) {
+            chooseAccount(account);
+            if (account != current()) return false;
+        } else {
+            syncStudioDraft();
+            if (!select(account)) return false;
+            if (screen == WEB) renderScreen(WEB);
+        }
+        updateStudioAccount();
+        updateQuickSwitchFace();
+        renderSidebar();
+        syncCurrentQuota();
+        return true;
+    }
+
+    @Override public void notice(String text) { message(text); }
+
     @Override public void refreshAccount(AccountStore.Account account) {
         String blocked = null;
         if (studio.running() != null) blocked = "请等当前生成结束后刷新额度。";
@@ -828,6 +969,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         studioResults = null;
         studioScroll = null;
         studioTitle = null;
+        studioSubtitle = null;
         studioMode = null;
         studioComposer = null;
         studioAccountValue = null;
@@ -852,15 +994,20 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private int rootColor() { return screen == STUDIO ? SURFACE : BG; }
 
     private LinearLayout studioHeader() {
-        LinearLayout toolbar = ui.compactToolbar();
-        toolbar.addView(sidebarButton(), headerIconSize());
-        studioTitle = ui.single(ui.text("Muse 工作室", 17, INK, true));
-        studioTitle.setPadding(ui.dp(6), 0, ui.dp(6), 0);
-        studioTitle.setGravity(Gravity.CENTER_VERTICAL);
-        studioTitle.setOnClickListener(view -> openSidebar());
-        studioTitle.setFocusable(true);
-        toolbar.addView(studioTitle, new LinearLayout.LayoutParams(0, ui.dp(36), 1));
-        toolbar.addView(ui.compactIconButton(R.drawable.ic_add, "新建会话", INK, this::newStudioSession), headerIconSize());
+        LinearLayout toolbar = ui.toolbar();
+        toolbar.addView(sidebarButton());
+        LinearLayout heading = ui.column();
+        heading.setPadding(ui.dp(6), 0, ui.dp(6), 0);
+        studioTitle = ui.single(ui.text("Muse 工作室", 16.5f, INK, true));
+        heading.addView(studioTitle);
+        studioSubtitle = ui.single(ui.meta("", 10.5f, MUTED));
+        LinearLayout.LayoutParams subtitlePosition = new LinearLayout.LayoutParams(-1, -2);
+        subtitlePosition.topMargin = ui.dp(4);
+        heading.addView(studioSubtitle, subtitlePosition);
+        heading.setOnClickListener(view -> openSidebar());
+        heading.setContentDescription("打开会话列表");
+        toolbar.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        toolbar.addView(ui.iconButton(R.drawable.ic_add, "新建会话", INK, this::newStudioSession));
         updateStudioSessionTitle();
         return toolbar;
     }
@@ -920,9 +1067,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private View renderStudioComposer() {
         LinearLayout shell = ui.column();
         studioComposer = shell;
-        shell.setBackground(ui.topShape(SURFACE, 20));
-        shell.setPadding(ui.dp(13), 0, ui.dp(13), ui.dp(10));
-        shell.setElevation(ui.dp(1));
+        shell.setBackground(ui.topShape(SURFACE, R_LG));
+        shell.setPadding(ui.dp(14), 0, ui.dp(14), ui.dp(8));
+        shell.setElevation(ui.dp(2));
         StudioSession composerSession = studio.currentSession();
         int initialHeight = composerSession == null ? ComposerHeight.DEFAULT_DP : ComposerHeight.clamp(composerSession.composerHeightDp, viewportDp());
 
@@ -936,18 +1083,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         resizeTarget.addView(resizeHandle, new FrameLayout.LayoutParams(ui.dp(38), ui.dp(4), Gravity.CENTER));
         shell.addView(resizeTarget, new LinearLayout.LayoutParams(-1, ui.dp(20)));
 
-        LinearLayout modes = ui.row();
-        studioMode = ui.segment(new String[]{"图片", "视频"}, new int[]{R.drawable.ic_mode_image, R.drawable.ic_mode_video},
-            false, video ? 1 : 0, index -> setStudioMode(index == 1));
-        studioMode.view.setContentDescription(video ? "生成视频" : "生成图片");
-        modes.addView(studioMode.view, new LinearLayout.LayoutParams(-2, -2));
-        modes.addView(ui.spacer());
-        studioReferenceButton = ui.iconButton(R.drawable.ic_reference, "添加参考图片", INK, this::pickReference);
-        modes.addView(studioReferenceButton);
-        ui.block(shell, modes, 0);
-
+        // 参考图缩略图在输入框上方；模式、参考图按钮和参数合并到底部一行。
         studioReferenceStrip = ui.column();
-        ui.block(shell, studioReferenceStrip, 10);
+        ui.block(shell, studioReferenceStrip, 2);
         updateReferencePreview();
 
         EditText input = new AppCompatEditText(this);
@@ -976,7 +1114,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             @Override public void afterTextChanged(Editable value) { }
         });
         LinearLayout.LayoutParams inputPosition = new LinearLayout.LayoutParams(-1, ui.dp(initialHeight));
-        inputPosition.topMargin = ui.dp(8);
+        inputPosition.topMargin = ui.dp(6);
         shell.addView(input, inputPosition);
 
         resizeTarget.setOnTouchListener(new View.OnTouchListener() {
@@ -1018,26 +1156,42 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         });
 
         LinearLayout controls = ui.row();
-        AccountStore.Account owner = current();
-        studioAccountAvatar = ui.avatar(owner == null ? "账号" : owner.name, owner == null ? "" : owner.id, 20);
-        studioAccount = ui.chip(studioAccountAvatar, owner == null ? "选择账号" : owner.name, "选择 Muse 账号", this::pickAccount);
-        studioAccountValue = (TextView) studioAccount.getTag();
-        controls.addView(studioAccount, new LinearLayout.LayoutParams(-2, ui.dp(34)));
-        updateStudioAccount();
+        studioReferenceButton = ui.compactIconButton(R.drawable.ic_reference, "添加参考图片", INK, this::pickReference);
+        studioReferenceButton.setBackground(ui.touchable(RAISED, R_SM, 0));
+        controls.addView(studioReferenceButton, new LinearLayout.LayoutParams(ui.dp(34), ui.dp(34)));
+        studioMode = ui.segment(new String[]{"", ""}, new int[]{R.drawable.ic_mode_image, R.drawable.ic_mode_video},
+            false, video ? 1 : 0, index -> setStudioMode(index == 1));
+        studioMode.describe(0, "生成图片");
+        studioMode.describe(1, "生成视频");
+        studioMode.view.setContentDescription(video ? "生成视频" : "生成图片");
+        LinearLayout.LayoutParams modePosition = new LinearLayout.LayoutParams(-2, ui.dp(34));
+        modePosition.setMarginStart(ui.dp(5));
+        controls.addView(studioMode.view, modePosition);
         String[] ratios = video ? VIDEO_RATIOS : IMAGE_RATIOS;
         LinearLayout ratioChip = ui.chip(ui.ratioBox(ratio, 13, TEXT2), prettyRatio(ratio), "画幅比例 · " + prettyRatio(ratio),
-            () -> chooseRatio(ratios));
+            false, () -> chooseRatio(ratios));
         LinearLayout.LayoutParams ratioPosition = new LinearLayout.LayoutParams(-2, ui.dp(34));
-        ratioPosition.setMarginStart(ui.dp(6));
+        ratioPosition.setMarginStart(ui.dp(5));
         controls.addView(ratioChip, ratioPosition);
         if (video) {
-            LinearLayout durationChip = ui.chip(ui.iconView(R.drawable.ic_duration, TEXT2, 15), seconds + " 秒",
-                "视频时长 · " + seconds + " 秒", this::chooseDuration);
+            LinearLayout durationChip = ui.chip(null, seconds + " 秒", "视频时长 · " + seconds + " 秒", false, this::chooseDuration);
             LinearLayout.LayoutParams durationPosition = new LinearLayout.LayoutParams(-2, ui.dp(34));
-            durationPosition.setMarginStart(ui.dp(6));
+            durationPosition.setMarginStart(ui.dp(5));
             controls.addView(durationChip, durationPosition);
         }
         controls.addView(ui.spacer());
+        // 账号：只显示头像，外圈描边是这个账号的额度颜色；点按换号。
+        AccountStore.Account owner = current();
+        studioAccountAvatar = ui.avatar(owner == null ? "账号" : owner.name, owner == null ? "" : owner.id, 24);
+        studioAccount = ui.row();
+        studioAccount.setGravity(Gravity.CENTER);
+        studioAccount.addView(studioAccountAvatar, new LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)));
+        ui.touch(studioAccount, Color.TRANSPARENT, 17, LINE_STRONG, this::pickAccount);
+        studioAccountValue = null;
+        LinearLayout.LayoutParams accountPosition = new LinearLayout.LayoutParams(ui.dp(34), ui.dp(34));
+        accountPosition.setMarginStart(ui.dp(5));
+        controls.addView(studioAccount, accountPosition);
+        updateStudioAccount();
         ImageButton send = ui.sendButton(this::submit);
         send.setContentDescription("发送生成请求");
         send.setTooltipText("发送生成请求");
@@ -1114,7 +1268,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (studioReferenceButton != null) {
             String label = count == 0 ? "添加参考图片（最多 " + max + " 张）" : count >= max ? "已添加 " + count + " 张参考图（已达上限）"
                 : "已添加 " + count + " 张参考图，点击继续添加";
-            studioReferenceButton.setImageTintList(android.content.res.ColorStateList.valueOf(count > 0 ? ACCENT : INK));
+            studioReferenceButton.setImageTintList(android.content.res.ColorStateList.valueOf(INK));
             studioReferenceButton.setContentDescription(label);
             studioReferenceButton.setTooltipText(label);
         }
@@ -1308,6 +1462,15 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             studioTitle.setText(title);
             studioTitle.setContentDescription(title + "，打开会话列表");
         }
+        if (studioSubtitle != null) {
+            int count = studio == null ? 0 : studio.currentEntries().size();
+            AccountStore.Account account = current();
+            MobileStudio.Entry running = studio == null ? null : studio.running();
+            boolean here = running != null && session != null && session.id.equals(running.sessionId);
+            studioSubtitle.setText((here ? "生成中" : count == 0 ? "还没有记录" : count + " 条记录") + " · "
+                + (account == null ? "未选择账号" : account.name));
+            studioSubtitle.setTextColor(here ? ACCENT : TEXT2);
+        }
     }
 
     private void newStudioSession() {
@@ -1459,7 +1622,18 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             studioAccountAvatar.setTextColor(fresh.getCurrentTextColor());
             studioAccountAvatar.setBackground(fresh.getBackground());
         }
-        String label = account == null ? "选择 Muse 账号" : "账号 · " + name;
+        AccountQuota quota = account == null || quotas == null ? null : quotas.value(account.id);
+        long now = System.currentTimeMillis();
+        boolean known = quota != null && quota.currentWeek(now);
+        int ring = !known ? LINE_STRONG : quota.used() == null ? Q0 : MobileUi.quotaColor(quota.used());
+        android.graphics.drawable.GradientDrawable edge = new android.graphics.drawable.GradientDrawable();
+        edge.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        edge.setColor(Color.TRANSPARENT);
+        edge.setStroke(ui.dp(known ? 2 : 1), ring);
+        studioAccount.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(ui.ripple()), edge, null));
+        String usage = !known ? "" : quota.used() == null ? "，不限量" : "，已用 " + Math.round(quota.used()) + "%";
+        String label = account == null ? "选择 Muse 账号" : "账号 · " + name + usage;
         studioAccount.setContentDescription(label);
         studioAccount.setTooltipText(label);
     }
@@ -1642,8 +1816,12 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             sidebar.updateQuota(id, quotas);
             sidebar.updateAvatar(id, quotas.avatar(id));
         }
-        if (!closing) updateQuickSwitchFace();
-        if (!closing && accountEditor != null) accountEditor.updateQuota(id);
+        if (!closing) {
+            updateQuickSwitchFace();
+            AccountStore.Account account = current();
+            if (account != null && account.id.equals(id)) updateStudioAccount();
+            if (accountEditor != null) accountEditor.updateQuota(id);
+        }
     }
 
     @Override public void editAccount(AccountStore.Account account) {
@@ -1883,7 +2061,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         right.addView(badge);
         TextView ip = ui.single(ui.text(row.ip != null ? row.ip : "出口 IP：" + (row.ipError == null ? "未知" : row.ipError), 12,
             row.ip != null ? TEXT2 : MUTED, false));
-        if (row.ip != null) ip.setTypeface(android.graphics.Typeface.MONOSPACE);
+        if (row.ip != null) ip.setTypeface(MobileUi.MONO);
         ip.setGravity(Gravity.END);
         ip.setMaxWidth(ui.dp(170));
         LinearLayout.LayoutParams ipPosition = new LinearLayout.LayoutParams(-2, -2);

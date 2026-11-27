@@ -25,3 +25,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## JetBrains Mono
+
+`app/src/main/res/font/jetbrains_mono_regular.ttf` and `jetbrains_mono_medium.ttf` are the
+unmodified Regular and Medium weights of JetBrains Mono, used for metadata such as ratios,
+quota percentages and proxy endpoints: https://github.com/JetBrains/JetBrainsMono
+
+Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
+Licensed under the SIL Open Font License, Version 1.1. The full license text is in
+`LICENSES/JetBrainsMono-OFL-1.1.txt`.

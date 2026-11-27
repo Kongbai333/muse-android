@@ -5,57 +5,48 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Color;
-import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.core.view.ViewCompat;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.function.Predicate;
 
 import static com.muse.workspace.mobile.MobileUi.*;
 
-/** 左侧滑入的会话 / 账号侧栏。 */
+/** 左侧滑入的会话 / 账号侧栏：顶部下划线分页 + 「+」，账号叠放显示，底部一行图标导航。 */
 final class AccountSidebar extends FrameLayout {
-    interface Host {
+    interface Host extends AccountDeck.Host {
         void sidebarClosed();
         void openStudio();
         void openProxyManager();
-        void openAccount(AccountStore.Account account);
-        void refreshAccount(AccountStore.Account account);
-        void editAccount(AccountStore.Account account);
-        void exportAccounts();
-        void importAccounts();
-        void importCookieText();
         void createStudioSession();
         void selectStudioSession(StudioSession session);
         void deleteStudioSessions(List<StudioSession> sessions);
         void toggleTheme();
         void checkForUpdates();
+        void importAccounts();
+        void importCookieText();
+        void exportAccounts();
     }
 
     private final MobileUi ui;
     private final Host host;
     private final ProxyStore proxies;
     private final View scrim;
-    private final LinearLayout panel, sessionRows, footer, navigation;
-    private final AccountCardStack rows;
+    private final LinearLayout panel, rows, sessionRows, footer, navigation;
     private final ScrollView accountScroll, sessionScroll;
-    private final MobileUi.Segment tabs;
-    private final HashMap<String, QuotaCard> cards = new HashMap<>();
-    private final HashMap<String, ImageView> avatarImages = new HashMap<>();
-    private final HashMap<String, TextView> avatarFallbacks = new HashMap<>();
-    private final HashMap<String, AccountCardStack.Card> accountCards = new HashMap<>();
-    private final java.util.HashSet<String> expandedAccountIds = new java.util.HashSet<>();
-    private final HashMap<String, ValueAnimator> accountMotions = new HashMap<>();
+    private final TextView sessionTab, accountTab;
+    private final View sessionLine, accountLine, accountEmpty;
+    private final ImageButton addButton;
+    private final AccountDeck deck;
     private ValueAnimator transition;
     private float reveal;
     private boolean hiding;
@@ -84,21 +75,53 @@ final class AccountSidebar extends FrameLayout {
         addView(scrim, new LayoutParams(-1, -1));
 
         panel = ui.column();
-        panel.setBackground(ui.endShape(SURFACE, 20));
+        panel.setBackground(ui.endShape(SURFACE, 18));
         panel.setElevation(ui.dp(10));
         panel.setClickable(true);
         panel.setFocusableInTouchMode(true);
         ViewCompat.setAccessibilityPaneTitle(panel, "侧边栏");
         addView(panel, new LayoutParams(ui.dp(340), -1, Gravity.START));
 
-        tabs = ui.segment(new String[]{"会话", "账号"}, null, true, 0, index -> {
-            sessionsShown = index == 0;
-            if (!sessionsShown && picking) { picking = false; picked.clear(); renderSessions(); }
-            updateSection();
-        });
-        LinearLayout.LayoutParams tabPosition = new LinearLayout.LayoutParams(-1, -2);
-        tabPosition.setMargins(ui.dp(14), ui.dp(6), ui.dp(14), 0);
-        panel.addView(tabs.view, tabPosition);
+        LinearLayout heading = ui.row();
+        heading.setPadding(ui.dp(20), ui.dp(4), ui.dp(8), 0);
+        TextView name = ui.text("Muse", 20, INK, true);
+        name.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD));
+        heading.addView(name, new LinearLayout.LayoutParams(-2, -2));
+        View mark = new View(context);
+        mark.setBackground(ui.shape(ACCENT, 2, 0));
+        LinearLayout.LayoutParams markPosition = new LinearLayout.LayoutParams(ui.dp(6), ui.dp(6));
+        markPosition.setMarginStart(ui.dp(3));
+        markPosition.gravity = Gravity.BOTTOM;
+        markPosition.bottomMargin = ui.dp(3);
+        heading.addView(mark, markPosition);
+        heading.addView(ui.spacer());
+        heading.addView(ui.compactIconButton(R.drawable.ic_close, "关闭侧边栏", INK, () -> close(true)));
+        ui.block(panel, heading, 0);
+
+        // 分页：文字 + 下划线，右侧「+」按当前分页新建会话或添加账号。
+        LinearLayout tabBar = ui.row();
+        tabBar.setPadding(ui.dp(20), ui.dp(2), ui.dp(8), 0);
+        LinearLayout sessionColumn = ui.column();
+        sessionTab = ui.text("会话", 14, MUTED, false);
+        sessionLine = new View(context);
+        tab(sessionColumn, sessionTab, sessionLine, () -> selectTab(true));
+        tabBar.addView(sessionColumn, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout accountColumn = ui.column();
+        accountTab = ui.text("账号", 14, MUTED, false);
+        accountLine = new View(context);
+        tab(accountColumn, accountTab, accountLine, () -> selectTab(false));
+        LinearLayout.LayoutParams accountPosition = new LinearLayout.LayoutParams(-2, -2);
+        accountPosition.setMarginStart(ui.dp(18));
+        tabBar.addView(accountColumn, accountPosition);
+        tabBar.addView(ui.spacer());
+        addButton = ui.compactIconButton(R.drawable.ic_add, "新建会话", INK, this::addToSection);
+        tabBar.addView(addButton);
+        panel.addView(tabBar, new LinearLayout.LayoutParams(-1, -2));
+        View tabRule = new View(context);
+        tabRule.setBackgroundColor(LINE);
+        LinearLayout.LayoutParams rulePosition = new LinearLayout.LayoutParams(-1, ui.dp(1));
+        rulePosition.setMargins(ui.dp(14), 0, ui.dp(14), 0);
+        panel.addView(tabRule, rulePosition);
 
         FrameLayout lists = new FrameLayout(context);
         sessionRows = ui.column();
@@ -107,13 +130,25 @@ final class AccountSidebar extends FrameLayout {
         sessionScroll.setVerticalScrollBarEnabled(false);
         sessionScroll.addView(sessionRows, new ScrollView.LayoutParams(-1, -2));
         lists.addView(sessionScroll, new FrameLayout.LayoutParams(-1, -1));
-        rows = new AccountCardStack(context);
-        rows.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10));
+        rows = ui.column();
+        rows.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(16));
+        rows.setClipChildren(false);
+        rows.setClipToPadding(false);
+        deck = new AccountDeck(context, ui, host, proxies);
+        rows.addView(deck, new LinearLayout.LayoutParams(-1, -2));
+        accountEmpty = empty("还没有 Muse 账号", "点右上角的 + 添加一个账号，在网页里登录后就能开始创作。");
+        rows.addView(accountEmpty, new LinearLayout.LayoutParams(-1, -2));
         accountScroll = new ScrollView(context);
         accountScroll.setVerticalScrollBarEnabled(false);
+        accountScroll.setClipChildren(false);
         accountScroll.addView(rows, new ScrollView.LayoutParams(-1, -2));
         lists.addView(accountScroll, new FrameLayout.LayoutParams(-1, -1));
         panel.addView(lists, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        // 只在多选删除或无法添加账号时出现的操作区。
+        footer = ui.column();
+        footer.setPadding(ui.dp(14), ui.dp(8), ui.dp(14), ui.dp(10));
+        panel.addView(footer, new LinearLayout.LayoutParams(-1, -2));
 
         View line = new View(context);
         line.setBackgroundColor(LINE);
@@ -121,14 +156,31 @@ final class AccountSidebar extends FrameLayout {
         linePosition.setMargins(ui.dp(14), 0, ui.dp(14), 0);
         panel.addView(line, linePosition);
 
-        footer = ui.column();
-        footer.setPadding(ui.dp(14), ui.dp(12), ui.dp(14), 0);
-        panel.addView(footer, new LinearLayout.LayoutParams(-1, -2));
-        navigation = ui.column();
-        navigation.setPadding(ui.dp(10), ui.dp(6), ui.dp(10), ui.dp(18));
+        // 底部导航：一行三个入口，图标在上、文字在下。
+        navigation = ui.row();
+        navigation.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(12));
         panel.addView(navigation, new LinearLayout.LayoutParams(-1, -2));
         updateSection();
         setVisibility(GONE);
+    }
+
+    private void tab(LinearLayout column, TextView label, View underline, Runnable action) {
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        label.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams labelPosition = new LinearLayout.LayoutParams(-2, ui.dp(40));
+        column.addView(label, labelPosition);
+        LinearLayout.LayoutParams linePosition = new LinearLayout.LayoutParams(-1, ui.dp(2));
+        column.addView(underline, linePosition);
+        column.setFocusable(true);
+        column.setClickable(true);
+        column.setOnClickListener(view -> action.run());
+    }
+
+    private void selectTab(boolean sessions) {
+        if (sessions == sessionsShown) return;
+        sessionsShown = sessions;
+        if (!sessionsShown && picking) { picking = false; picked.clear(); renderSessions(); }
+        updateSection();
     }
 
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -151,6 +203,7 @@ final class AccountSidebar extends FrameLayout {
         applyReveal(0f);
         panel.requestFocus();
         slideTo(1f);
+        if (!sessionsShown) deck.replay();
     }
 
     void close(boolean animate) {
@@ -214,8 +267,6 @@ final class AccountSidebar extends FrameLayout {
 
     @Override protected void onDetachedFromWindow() {
         cancelTransition();
-        cancelAccountMotions();
-        for (AccountCardStack.Card card : accountCards.values()) card.reveal(card.expanded() ? 1f : 0f);
         super.onDetachedFromWindow();
     }
 
@@ -227,18 +278,10 @@ final class AccountSidebar extends FrameLayout {
         this.studioActive = studioActive;
         this.proxyActive = proxyActive;
 
-        cancelAccountMotions();
-        accountCards.clear();
-        cards.clear();
-        avatarImages.clear();
-        avatarFallbacks.clear();
-        rows.removeAllViews();
-        for (AccountStore.Account account : accounts) {
-            rows.addView(accountCard(account, account == current, usable.test(account), quotas.value(account.id),
-                rows.getChildCount() + 1 < accounts.size()));
-        }
-        expandedAccountIds.retainAll(accountCards.keySet());
-        if (accounts.isEmpty()) rows.addView(empty("还没有 Muse 账号", "添加一个账号，在网页里登录后就能开始创作。"));
+        boolean switched = deck.bind(accounts, current, usable, quotas);
+        deck.setVisibility(accounts.isEmpty() ? GONE : VISIBLE);
+        accountEmpty.setVisibility(accounts.isEmpty() ? VISIBLE : GONE);
+        if (switched && accountScroll.getScrollY() > 0) accountScroll.smoothScrollTo(0, 0);
 
         shownSessions = new java.util.ArrayList<>(sessions);
         shownSelected = selectedSession;
@@ -257,10 +300,9 @@ final class AccountSidebar extends FrameLayout {
         sessionCount = shownSessions.size();
         if (!shownSessions.isEmpty()) ui.block(sessionRows, sessionHeader(), 0);
         for (StudioSession session : shownSessions) {
-            ui.block(sessionRows, sessionRow(session, session == shownSelected, session.id.equals(shownRunning)),
-                sessionRows.getChildCount() <= 1 ? 2 : 2);
+            ui.block(sessionRows, sessionRow(session, session == shownSelected, session.id.equals(shownRunning)), 2);
         }
-        if (shownSessions.isEmpty()) sessionRows.addView(empty("还没有会话", "点击下方按钮开始创作。"));
+        if (shownSessions.isEmpty()) sessionRows.addView(empty("还没有会话", "点右上角的 + 新建一个会话开始创作。"));
     }
 
     /** 列表顶部一行：平时显示“管理”，管理中显示已选数量、全选与完成。 */
@@ -270,8 +312,8 @@ final class AccountSidebar extends FrameLayout {
         header.setPadding(ui.dp(6), 0, 0, 0);
         int selectable = 0;
         for (StudioSession session : shownSessions) if (!session.id.equals(shownRunning)) selectable++;
-        TextView label = ui.text(picking ? (picked.isEmpty() ? "选择要删除的会话" : "已选 " + picked.size() + " 个") : "最近的会话",
-            12.5f, picking ? INK : MUTED, picking);
+        TextView label = picking ? ui.text(picked.isEmpty() ? "选择要删除的会话" : "已选 " + picked.size() + " 个", 12.5f, INK, true)
+            : ui.meta("最近的会话", 10, MUTED);
         header.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         if (picking) {
             boolean all = selectable > 0 && picked.size() >= selectable;
@@ -280,7 +322,7 @@ final class AccountSidebar extends FrameLayout {
                 else for (StudioSession session : shownSessions) if (!session.id.equals(shownRunning)) picked.add(session.id);
                 refreshPicking();
             }));
-            header.addView(headerAction("完成", ACCENT, () -> setPicking(false, null)));
+            header.addView(headerAction("完成", INK, () -> setPicking(false, null)));
         } else header.addView(headerAction("管理", TEXT2, () -> setPicking(true, null)));
         return header;
     }
@@ -290,7 +332,7 @@ final class AccountSidebar extends FrameLayout {
         view.setGravity(Gravity.CENTER);
         view.setMinHeight(ui.dp(34));
         view.setPadding(ui.dp(10), 0, ui.dp(10), 0);
-        ui.touch(view, Color.TRANSPARENT, 10, 0, action);
+        ui.touch(view, Color.TRANSPARENT, R_SM, 0, action);
         return view;
     }
 
@@ -314,18 +356,18 @@ final class AccountSidebar extends FrameLayout {
         refreshPicking();
     }
 
+    private void togglePicked(StudioSession session) {
+        if (session.id.equals(shownRunning)) return;
+        if (!picked.remove(session.id)) picked.add(session.id);
+        refreshPicking();
+    }
+
     boolean finishPickingOnBack() {
         if (!picking) return false;
         int scroll = sessionScroll.getScrollY();
         finishPicking();
         sessionScroll.post(() -> sessionScroll.scrollTo(0, scroll));
         return true;
-    }
-
-    private void togglePicked(StudioSession session) {
-        if (session.id.equals(shownRunning)) return;
-        if (!picked.remove(session.id)) picked.add(session.id);
-        refreshPicking();
     }
 
     private View empty(String title, String detail) {
@@ -338,40 +380,40 @@ final class AccountSidebar extends FrameLayout {
 
     private View sessionRow(StudioSession session, boolean selected, boolean running) {
         FrameLayout frame = new FrameLayout(getContext());
-        // 仅显示单行标题；账号/类型留在完整无障碍说明里。
+        // 纯文字的紧凑行：标题 + 账号 · 类型。
         LinearLayout row = ui.row();
         row.setMinimumHeight(ui.dp(48));
         row.setPadding(ui.dp(14), ui.dp(7), ui.dp(12), ui.dp(7));
-        TextView title = ui.single(ui.text(session.name, 14, INK, selected));
-        title.setMinWidth(0);
-        // 标题不再单独持有 tooltip 手势，短按和长按都交给整行。
-        title.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-        title.setFocusable(false);
-        LinearLayout.LayoutParams titlePosition = new LinearLayout.LayoutParams(0, -2, 1);
-        titlePosition.setMarginEnd(ui.dp(6));
-        row.addView(title, titlePosition);
-        if (running) row.addView(ui.text("生成中", 11, ACCENT, true));
+        LinearLayout words = ui.column();
+        words.setPadding(0, 0, ui.dp(6), 0);
+        words.addView(ui.single(ui.text(session.name, 14, INK, selected)));
+        TextView sub = ui.single(ui.meta((session.video ? "VID · " : "IMG · ") + session.ownerName, 10, MUTED));
+        LinearLayout.LayoutParams subPosition = new LinearLayout.LayoutParams(-1, -2);
+        subPosition.topMargin = ui.dp(4);
+        words.addView(sub, subPosition);
+        row.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
+        if (running) row.addView(ui.text("显影中", 11, ACCENT, true));
         boolean checked = picking && picked.contains(session.id);
         if (picking && !running) row.addView(checkMark(checked), new LinearLayout.LayoutParams(ui.dp(20), ui.dp(20)));
         row.setSelected(picking ? checked : selected);
         if (picking) {
-            ui.touch(row, checked ? ACCENT_SOFT : Color.TRANSPARENT, 12, 0, () -> togglePicked(session));
+            ui.touch(row, checked ? RAISED : Color.TRANSPARENT, R_MD, 0, () -> togglePicked(session));
             if (running) row.setAlpha(0.5f);
         } else {
-            ui.touch(row, selected ? RAISED : Color.TRANSPARENT, 12, 0, () -> host.selectStudioSession(session));
+            ui.touch(row, selected ? RAISED : Color.TRANSPARENT, R_MD, 0, () -> host.selectStudioSession(session));
             row.setOnLongClickListener(view -> {
                 view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
                 setPicking(true, session);
                 return true;
             });
         }
-        row.setContentDescription(session.name + "，" + session.ownerName + (session.video ? "，视频" : "，图片") + (selected ? "，当前会话" : "")
+        row.setContentDescription(session.name + "，" + session.ownerName + (selected ? "，当前会话" : "")
             + (running ? "，生成中" : "") + (picking ? (running ? "，生成中不能删除" : checked ? "，已选中" : "，未选中")
                 : "，长按可多选删除"));
         frame.addView(row, new FrameLayout.LayoutParams(-1, -2));
         if (selected && !picking) {
             View bar = new View(getContext());
-            bar.setBackground(ui.shape(ACCENT, 2, 0));
+            bar.setBackground(ui.shape(INK, 2, 0));
             FrameLayout.LayoutParams barPosition = new FrameLayout.LayoutParams(ui.dp(3), ui.dp(18), Gravity.START | Gravity.CENTER_VERTICAL);
             barPosition.setMarginStart(ui.dp(4));
             frame.addView(bar, barPosition);
@@ -381,8 +423,8 @@ final class AccountSidebar extends FrameLayout {
 
     private View checkMark(boolean checked) {
         FrameLayout box = new FrameLayout(getContext());
-        box.setBackground(ui.shape(checked ? ACCENT : Color.TRANSPARENT, 11, checked ? 0 : LINE_STRONG));
-        if (checked) box.addView(ui.iconView(R.drawable.ic_check, ON_ACCENT, 14),
+        box.setBackground(ui.shape(checked ? INK : Color.TRANSPARENT, 11, checked ? 0 : LINE_STRONG));
+        if (checked) box.addView(ui.iconView(R.drawable.ic_check, BG, 14),
             new FrameLayout.LayoutParams(ui.dp(14), ui.dp(14), Gravity.CENTER));
         return box;
     }
@@ -404,31 +446,37 @@ final class AccountSidebar extends FrameLayout {
     }
 
     private void updateSection() {
-        tabs.select(sessionsShown ? 0 : 1);
-        tabs.setLabel(0, "会话  " + sessionCount);
-        tabs.setLabel(1, "账号  " + accountCount);
+        paintTab(sessionTab, sessionLine, sessionsShown, "会话", sessionCount);
+        paintTab(accountTab, accountLine, !sessionsShown, "账号", accountCount);
         sessionScroll.setVisibility(sessionsShown ? VISIBLE : GONE);
         accountScroll.setVisibility(sessionsShown ? GONE : VISIBLE);
 
+        boolean adding = sessionsShown ? !picking : canAddAccount;
+        addButton.setVisibility(adding ? VISIBLE : GONE);
+        addButton.setImageResource(sessionsShown ? R.drawable.ic_add : R.drawable.ic_user_plus);
+        String addLabel = sessionsShown ? "新建会话" : "添加账号";
+        addButton.setContentDescription(addLabel);
+        addButton.setTooltipText(addLabel);
+
         footer.removeAllViews();
         View action = sessionsShown && picking ? deleteAction()
-            : sessionsShown ? ui.primary("新建会话", host::createStudioSession)
-            : canAddAccount ? ui.primary("添加账号", () -> host.editAccount(null))
-            : ui.note("更新 Android System WebView 或 Chrome 后可添加多个账号。", 0);
-        footer.addView(action, new LinearLayout.LayoutParams(-1, -2));
+            : !sessionsShown && !canAddAccount ? ui.note("更新 Android System WebView 或 Chrome 后可添加多个账号。", 0) : null;
+        footer.setVisibility(action == null ? GONE : VISIBLE);
+        if (action != null) footer.addView(action, new LinearLayout.LayoutParams(-1, -2));
+
         navigation.removeAllViews();
-        navigation.addView(settingsBar());
+        int proxyCount = proxies.all().size();
+        dock(R.drawable.ic_studio, "工作室", "", studioActive, host::openStudio);
+        dock(R.drawable.ic_route, "代理设置", proxyCount == 0 ? "" : String.valueOf(proxyCount), proxyActive, host::openProxyManager);
+        dock(MobileUi.themeIcon(getContext()), MobileUi.themeMode(getContext()).label, "", false, host::toggleTheme)
+            .setContentDescription("外观，" + MobileUi.themeDescription(getContext()));
+        dock(R.drawable.ic_web_refresh, "检查更新", "", false, host::checkForUpdates);
+        dock(R.drawable.ic_transfer, "导入导出", "", false, this::showTransferChoices);
     }
 
-    private View settingsBar() {
-        int proxyCount = proxies.all().size();
-        LinearLayout settings = ui.row();
-        settings.addView(settingsIcon(R.drawable.ic_route, "代理设置", proxyCount == 0 ? "未配置代理" : proxyCount + " 条",
-            proxyActive, host::openProxyManager));
-        settings.addView(settingsIcon(MobileUi.themeIcon(getContext()), "外观", MobileUi.themeDescription(getContext()), false, host::toggleTheme));
-        settings.addView(settingsIcon(R.drawable.ic_web_refresh, "检查更新", "", false, host::checkForUpdates));
-        settings.addView(settingsIcon(R.drawable.ic_transfer, "导入导出", "", false, this::showTransferChoices));
-        return settings;
+    private void addToSection() {
+        if (sessionsShown) host.createStudioSession();
+        else if (canAddAccount) host.editAccount(null);
     }
 
     private void showTransferChoices() {
@@ -442,27 +490,14 @@ final class AccountSidebar extends FrameLayout {
             .setNegativeButton("取消", null).show();
     }
 
-    private View settingsIcon(int icon, String label, String value, boolean active, Runnable action) {
-        String description = label + (value.isEmpty() ? "" : "，" + value) + (active ? "，已选中" : "");
-        TextView button = ui.single(ui.text(label, 10.5f, active ? ACCENT : TEXT2, false));
-        button.setGravity(Gravity.CENTER);
-        Drawable image = getContext().getDrawable(icon);
-        if (image != null) {
-            image = image.mutate();
-            image.setTint(active ? ACCENT : TEXT2);
-            image.setBounds(0, 0, ui.dp(20), ui.dp(20));
-            button.setCompoundDrawablesRelative(null, image, null, null);
-            button.setCompoundDrawablePadding(ui.dp(4));
-        }
-        ui.pad(button, 4, 6);
-        button.setSelected(active);
-        button.setMinimumWidth(ui.dp(48));
-        button.setMinimumHeight(ui.dp(56));
-        button.setContentDescription(description);
-        button.setTooltipText(description);
-        ui.touch(button, active ? ACCENT_SOFT : Color.TRANSPARENT, 12, 0, action);
-        button.setLayoutParams(new LinearLayout.LayoutParams(0, ui.dp(56), 1));
-        return button;
+    private void paintTab(TextView label, View underline, boolean on, String name, int count) {
+        label.setText(name + "  " + count);
+        label.setTextColor(on ? INK : MUTED);
+        label.setTypeface(android.graphics.Typeface.create(on ? "sans-serif-medium" : "sans-serif", android.graphics.Typeface.NORMAL));
+        underline.setBackgroundColor(on ? INK : Color.TRANSPARENT);
+        View column = (View) label.getParent();
+        column.setSelected(on);
+        column.setContentDescription(name + "，" + count + " 个" + (on ? "，已选中" : ""));
     }
 
     private View deleteAction() {
@@ -479,147 +514,43 @@ final class AccountSidebar extends FrameLayout {
         });
     }
 
-    private View navRow(int icon, String label, String value, boolean active, Runnable action) {
-        LinearLayout row = ui.row();
-        row.setMinimumHeight(ui.dp(46));
-        row.setPadding(ui.dp(12), 0, ui.dp(12), 0);
-        row.addView(ui.iconView(icon, active ? ACCENT : TEXT2, 19));
-        TextView text = ui.text(label, 14.5f, INK, active);
-        LinearLayout.LayoutParams textPosition = new LinearLayout.LayoutParams(0, -2, 1);
-        textPosition.setMarginStart(ui.dp(12));
-        row.addView(text, textPosition);
-        if (!value.isEmpty()) row.addView(ui.text(value, 12.5f, MUTED, false));
-        row.setSelected(active);
-        row.setContentDescription(label + (value.isEmpty() ? "" : "，" + value));
-        ui.touch(row, Color.TRANSPARENT, 12, 0, action);
-        return row;
-    }
-
-    private View accountCard(AccountStore.Account account, boolean active, boolean usable, AccountQuota quotaData, boolean followed) {
-        AccountAppearance.Skin skin = AccountAppearance.read(getContext(), account.id);
-        LinearLayout card = ui.column();
-        card.setPadding(ui.dp(14), ui.dp(15), ui.dp(14), ui.dp(13));
-        Runnable toggleDetails = () -> toggleAccount(account.id);
-
-        LinearLayout header = ui.column();
-        header.setPadding(0, 0, 0, ui.dp(11));
-        FrameLayout portrait = new FrameLayout(getContext());
-        TextView avatarFallback = ui.avatar(account.name, account.id, 35);
-        portrait.addView(avatarFallback, new FrameLayout.LayoutParams(-1, -1));
-        ImageView avatar = new ImageView(getContext());
-        avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        avatar.setBackground(ui.shape(RAISED, 18, 0));
-        avatar.setClipToOutline(true);
-        avatar.setVisibility(View.GONE);
-        portrait.addView(avatar, new FrameLayout.LayoutParams(-1, -1));
-        avatarImages.put(account.id, avatar);
-        avatarFallbacks.put(account.id, avatarFallback);
-        LinearLayout identity = ui.column();
-        TextView label = AccountCardTypography.name(ui, skin, account.name);
-        label.setTooltipText(account.name);
-        // Tooltip 文字本身会消费触摸，短按显式复用卡片动作，完整名称仍可长按查看。
-        label.setOnClickListener(ignored -> toggleDetails.run());
-        label.setFocusable(false);
-        label.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-        TextView plan = ui.tag(quotaData == null ? "待同步" : quotaData.plan());
-        skin.badge(plan, ui);
-        plan.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
-        ui.block(identity, new AccountNameLine(getContext(), label, plan, ui), 0);
-        ProxyProfile profile = proxies.find(account.proxyId());
-        String network = profile != null ? profile.name : !account.hasProxy() ? "直连"
-            : account.proxyId().isEmpty() ? account.networkLabel(proxies) : "未配置";
-        ui.block(identity, AccountCardTop.proxyLine(getContext(), ui, skin, network), 4);
-        AccountCardAction edit = usable ? new AccountCardAction(getContext(), ui, skin, R.drawable.ic_edit,
-            "编辑「" + account.name + "」", () -> { if (usable) host.editAccount(account); }) : null;
-        AccountCardAction switchAccount = usable ? new AccountCardAction(getContext(), ui, skin, R.drawable.ic_account_switch,
-            "切换到账号「" + account.name + "」", () -> { if (usable) host.openAccount(account); }) : null;
-        AccountCardTop top = new AccountCardTop(getContext(), ui, portrait, identity, edit, switchAccount, false);
-        ui.block(header, top, 0);
-
-        LinearLayout detailContent = ui.column();
-        QuotaCard quota = new QuotaCard(getContext(), ui, value -> {
-            plan.setText(value);
-            plan.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
-        }, toggleDetails, skin);
-        cards.put(account.id, quota);
-        LinearLayout.LayoutParams quotaPosition = new LinearLayout.LayoutParams(-1, -2);
-        quotaPosition.topMargin = ui.dp(10);
-        header.addView(quota.view, quotaPosition);
-        ui.block(card, header, 0);
-
-        detailContent.addView(quota.details, new LinearLayout.LayoutParams(-1, -2));
-        ui.block(card, detailContent, 0);
-        AccountCardStack.Card holder = new AccountCardStack.Card(getContext(), card, header, detailContent, top,
-            account.name + (active ? "，当前账号" : "") + (!usable ? "，需更新 WebView，不能切换" : ""), followed, toggleDetails);
-        holder.setSelected(active);
-        holder.setElevation(ui.dp(1));
-        holder.setBackground(skin.background(getContext(), active));
-        accountCards.put(account.id, holder);
-        holder.setExpanded(expandedAccountIds.contains(account.id));
-        holder.reveal(holder.expanded() ? 1f : 0f);
-        if (!usable) card.setAlpha(0.55f); // 只灰显内容，实体卡面保持不透明，遮住后方卡片。
-        return holder;
-    }
-
-    private void toggleAccount(String id) {
-        AccountCardStack.Card card = accountCards.get(id);
-        if (card == null || !card.hasFollowing()) return; // 末卡本来就整张可见，不制造假折叠态。
-        ValueAnimator previous = accountMotions.remove(id);
-        if (previous != null) previous.cancel();
-        int currentOffset = card.followingOffset();
-        boolean open = !card.expanded();
-        if (open) expandedAccountIds.add(id);
-        else expandedAccountIds.remove(id);
-        card.setExpanded(open);
-        float target = open ? 1f : 0f;
-        card.beginMove(currentOffset);
-        if (!ValueAnimator.areAnimatorsEnabled() || !rows.isLaidOut() || !isShown()) {
-            card.reveal(target);
-            return;
+    /** 底部导航的一格：上面图标（当前页衬底色），下面文字；代理数量做成角标。 */
+    private View dock(int icon, String label, String badge, boolean active, Runnable action) {
+        LinearLayout item = ui.column();
+        item.setGravity(Gravity.CENTER_HORIZONTAL);
+        item.setPadding(0, ui.dp(4), 0, ui.dp(4));
+        FrameLayout pill = new FrameLayout(getContext());
+        pill.setBackground(ui.shape(active ? RAISED : Color.TRANSPARENT, R_MD, 0));
+        pill.addView(ui.iconView(icon, active ? INK : TEXT2, 20), new FrameLayout.LayoutParams(ui.dp(20), ui.dp(20), Gravity.CENTER));
+        if (!badge.isEmpty()) {
+            TextView count = ui.metaStrong(badge, 8.5f, BG);
+            count.setGravity(Gravity.CENTER);
+            count.setMinWidth(ui.dp(14));
+            count.setPadding(ui.dp(3), 0, ui.dp(3), 0);
+            count.setBackground(ui.shape(INK, 7, 0));
+            FrameLayout.LayoutParams badgePosition = new FrameLayout.LayoutParams(-2, ui.dp(14), Gravity.TOP | Gravity.END);
+            badgePosition.setMarginEnd(ui.dp(5));
+            pill.addView(count, badgePosition);
         }
-        ValueAnimator motion = ValueAnimator.ofFloat(0f, 1f);
-        motion.setDuration(260);
-        motion.setInterpolator(new PathInterpolator(0.2f, 0f, 0.2f, 1f));
-        motion.addUpdateListener(value -> card.move((float) value.getAnimatedValue()));
-        motion.addListener(new AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(Animator animation) {
-                if (accountMotions.get(id) != animation) return;
-                accountMotions.remove(id);
-                card.reveal(target);
-            }
-        });
-        accountMotions.put(id, motion);
-        motion.start();
-    }
-
-    private void cancelAccountMotions() {
-        java.util.ArrayList<ValueAnimator> previous = new java.util.ArrayList<>(accountMotions.values());
-        accountMotions.clear();
-        for (ValueAnimator motion : previous) motion.cancel();
+        item.addView(pill, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(30)));
+        TextView text = ui.single(ui.text(label, 11, active ? INK : TEXT2, active));
+        text.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams textPosition = new LinearLayout.LayoutParams(-2, -2);
+        textPosition.topMargin = ui.dp(5);
+        item.addView(text, textPosition);
+        item.setSelected(active);
+        item.setContentDescription(label + (badge.isEmpty() ? "" : "，" + badge + " 条") + (active ? "，当前页面" : ""));
+        item.setTooltipText(label);
+        ui.touch(item, Color.TRANSPARENT, R_MD, 0, action);
+        navigation.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
+        return item;
     }
 
     void updateQuota(String id, QuotaSync quotas) {
-        QuotaCard card = cards.get(id);
-        if (card == null) return;
-        card.update(quotas.card(id), quotas.state(id));
-        AccountCardStack.Card frame = accountCards.get(id);
-        if (frame != null) frame.setWeekly(card.weeklyText());
+        deck.updateQuota(id);
     }
 
     void updateAvatar(String id, android.graphics.Bitmap image) {
-        applyAvatar(avatarImages.get(id), avatarFallbacks.get(id), image);
-    }
-
-    private void applyAvatar(ImageView view, TextView fallback, android.graphics.Bitmap image) {
-        if (view == null) return;
-        if (image == null) {
-            view.setImageDrawable(null);
-            view.setVisibility(View.GONE);
-            if (fallback != null) fallback.setVisibility(View.VISIBLE);
-        } else {
-            view.setImageBitmap(image);
-            view.setVisibility(View.VISIBLE);
-            if (fallback != null) fallback.setVisibility(View.GONE);
-        }
+        deck.updateAvatar(id, image);
     }
 }
