@@ -661,7 +661,8 @@ final class MobileUi {
         final LinearLayout body, actions;
         private final Activity owner;
         private java.util.function.BooleanSupplier dirty;
-        private boolean leaving, asking;
+        private boolean leaving;
+        private androidx.appcompat.app.AlertDialog discard;
 
         Sheet(Activity activity, String title, String subtitle) {
             owner = activity;
@@ -738,20 +739,20 @@ final class MobileUi {
         void dismissSaved() { closeNow(null, false); }
 
         private void requestLeave(Runnable after, boolean cancel) {
-            if (asking) return;
+            if (discard != null) return;
             if (owner.isFinishing() || owner.isDestroyed()) { closeNow(null, cancel); return; }
             if (dirty == null || !dirty.getAsBoolean()) { closeNow(after, cancel); return; }
-            asking = true;
-            androidx.appcompat.app.AlertDialog confirmation = MobileUi.dialog(owner)
+            discard = MobileUi.dialog(owner)
                 .setTitle("放弃本次修改？")
-                .setMessage("账号名称、代理或卡面还没有保存。你可以继续编辑，或放弃这次修改。")
+                .setMessage("账号设置还没有保存。你可以继续编辑，或放弃这次修改。")
                 .setNegativeButton("继续编辑", null)
                 .setPositiveButton("放弃修改", (choice, which) -> closeNow(after, cancel)).show();
-            confirmation.setOnDismissListener(ignored -> asking = false);
+            discard.setOnDismissListener(ignored -> discard = null);
         }
 
         private void closeNow(Runnable after, boolean cancel) {
             leaving = true;
+            if (discard != null) discard.dismiss();
             if (cancel) dialog.cancel(); else dialog.dismiss();
             if (after != null) after.run();
         }

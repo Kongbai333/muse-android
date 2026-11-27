@@ -8,7 +8,6 @@ import java.util.Locale;
 
 /** Read-only label presentation. Unknowns and independently cached observations stay distinct. */
 final class AccountCardLabels {
-    private static final long MAX_SAFE_TOKENS=(1L<<53)-1;
 
     static String extra(AccountCardState card) {
         return "额外 "+compact(consumed(card))+"/"+compact(tokens(card.extraTotal()));
@@ -45,7 +44,7 @@ final class AccountCardLabels {
     }
 
     private static Long tokens(Double raw){
-        if(raw==null||!Double.isFinite(raw)||raw<0||raw!=Math.floor(raw)||raw>MAX_SAFE_TOKENS/25)return null;
+        if(!AccountCardState.validExtraUnits(raw))return null;
         return raw.longValue()*25;
     }
 
@@ -66,5 +65,5 @@ final class AccountCardLabels {
         if(n>=10000)return value.divide(BigDecimal.valueOf(10000),2,RoundingMode.DOWN).stripTrailingZeros().toPlainString()+"万";
         return value.stripTrailingZeros().toPlainString();
     }
-    private static String time(long at){return at<=0?"\n成功时间：未知":"\n成功时间："+new SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.SIMPLIFIED_CHINESE).format(new Date(at));}
+    static String time(long at){return at<=0?"\n成功时间：未知":"\n成功时间："+new SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.SIMPLIFIED_CHINESE).format(new Date(at));}
 }

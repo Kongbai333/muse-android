@@ -158,12 +158,14 @@ final class AccountStore {
         throw new IOException("无法保存导入账号，账号未激活。");
     }
 
-    void update(Account account, String name, String proxyId) throws IOException {
+    void update(Account account, String name, String proxyId, boolean routeEdited) throws IOException {
         String previous = account.proxyId;
         JSONObject oldLegacy = account.legacyProxy;
         String previousName = account.name;
-        account.proxyId = proxyId == null ? "" : proxyId;
-        account.legacyProxy = null;
+        if (routeEdited) {
+            account.proxyId = proxyId == null ? "" : proxyId;
+            account.legacyProxy = null;
+        }
         account.name = name;
         if (!saveAccounts().commit()) {
             account.proxyId = previous;

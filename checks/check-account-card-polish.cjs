@@ -121,8 +121,7 @@ test('polish: label details are read-only native message dialogs with inert clos
 });
 
 test('values-copy: actual card update is inert until click, copies only full code, and handles unavailable clipboard honestly',()=>{
- const source=fs.readFileSync(path.join(base,'QuotaCard.java'),'utf8');
- const copy=source.includes('private void copyInviteCode(')?method('QuotaCard.java','private void copyInviteCode('):'';
+ const copy=method('QuotaCard.java','static void copyInviteCode(');
  javaCheck('CardValuesCopyHarness',`import java.text.SimpleDateFormat;
  public final class CardValuesCopyHarness{
   static final int INK=1,ACCENT=2;static final class Gravity{static final int END=1;}

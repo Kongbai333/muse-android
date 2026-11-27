@@ -4,6 +4,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -47,6 +48,11 @@ final class AccountSidebar extends FrameLayout {
     private final View sessionLine, accountLine, accountEmpty;
     private final ImageButton addButton;
     private final AccountDeck deck;
+    private final SharedPreferences positions;
+    private AccountDeck.Anchor anchor;
+    private int sessionPosition;
+    private boolean restoring;
+    private final Runnable persistScroll = this::savePosition;
     private ValueAnimator transition;
     private float reveal;
     private boolean hiding;
@@ -66,6 +72,10 @@ final class AccountSidebar extends FrameLayout {
         this.ui = ui;
         this.host = host;
         this.proxies = proxies;
+        positions = context.getSharedPreferences(MobileUi.PREFS, Context.MODE_PRIVATE);
+        sessionsShown = positions.getBoolean("sidebar-sessions", true);
+        sessionPosition = positions.getInt("sidebar-session-y", 0);
+        anchor = new AccountDeck.Anchor(positions.getString("sidebar-anchor", ""), positions.getInt("sidebar-slot", 0), positions.getInt("sidebar-offset", -ui.dp(12)));
 
         scrim = new View(context);
         scrim.setBackgroundColor(SCRIM);
@@ -143,6 +153,19 @@ final class AccountSidebar extends FrameLayout {
         accountScroll.setClipChildren(false);
         accountScroll.addView(rows, new ScrollView.LayoutParams(-1, -2));
         lists.addView(accountScroll, new FrameLayout.LayoutParams(-1, -1));
+        accountScroll.setOnScrollChangeListener((view, left, top, oldLeft, oldTop) -> {
+            if (!restoring && isOpen() && !sessionsShown && !deck.isLayoutRequested()) {
+                deck.settlePositions();
+                anchor = deck.anchor(top - deck.getTop());
+                scheduleSave();
+            }
+        });
+        sessionScroll.setOnScrollChangeListener((view, left, top, oldLeft, oldTop) -> {
+            if (!restoring && isOpen() && sessionsShown) {
+                sessionPosition = top;
+                scheduleSave();
+            }
+        });
         panel.addView(lists, new LinearLayout.LayoutParams(-1, 0, 1));
 
         // 只在多选删除或无法添加账号时出现的操作区。
@@ -179,6 +202,7 @@ final class AccountSidebar extends FrameLayout {
     private void selectTab(boolean sessions) {
         if (sessions == sessionsShown) return;
         sessionsShown = sessions;
+        savePosition();
         if (!sessionsShown && picking) { picking = false; picked.clear(); renderSessions(); }
         updateSection();
     }
@@ -190,8 +214,42 @@ final class AccountSidebar extends FrameLayout {
     }
 
     @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        restoring = true;
         super.onLayout(changed, left, top, right, bottom);
+        if (isOpen()) {
+            if (sessionsShown) sessionScroll.scrollTo(0, sessionPosition);
+            else if (accountCount > 0) {
+                accountScroll.scrollTo(0, deck.getTop() + deck.position(anchor));
+                if (accountScroll.getScrollY() > 0) deck.settlePositions();
+                AccountDeck.Anchor resolved = deck.anchor(accountScroll.getScrollY() - deck.getTop());
+                if (!resolved.equals(anchor)) { anchor = resolved; scheduleSave(); }
+            }
+        }
+        restoring = false;
         applyReveal(reveal);
+    }
+
+    private void scheduleSave() {
+        removeCallbacks(persistScroll);
+        postDelayed(persistScroll, 160);
+    }
+
+    void savePosition() {
+        removeCallbacks(persistScroll);
+        positions.edit().putBoolean("sidebar-sessions", sessionsShown).putInt("sidebar-session-y", sessionPosition)
+            .putString("sidebar-anchor", anchor.id()).putInt("sidebar-slot", anchor.slot()).putInt("sidebar-offset", anchor.offset()).apply();
+    }
+
+    void afterQuickSwitch(String id) { positions.edit().putString("sidebar-quick-target", id).apply(); }
+
+    void restoreDetailsFrom(AccountSidebar previous) { deck.restoreDetailsFrom(previous.deck); }
+
+    void forgetAccount(String id) {
+        if (id.equals(positions.getString("sidebar-quick-target", ""))) positions.edit().remove("sidebar-quick-target").apply();
+        if (id.equals(anchor.id())) {
+            anchor = new AccountDeck.Anchor("", anchor.slot(), anchor.offset());
+            savePosition();
+        }
     }
 
     void setTopInset(int top) { panel.setPadding(0, top, 0, 0); }
@@ -199,15 +257,24 @@ final class AccountSidebar extends FrameLayout {
     boolean isOpen() { return getVisibility() == VISIBLE; }
 
     void open() {
+        String target = positions.getString("sidebar-quick-target", "");
+        if (!target.isEmpty()) {
+            positions.edit().remove("sidebar-quick-target").apply();
+            if (target.equals(deck.currentId())) {
+                anchor = new AccountDeck.Anchor(target, 0, -rows.getPaddingTop());
+                showSessions(false);
+                savePosition();
+            }
+        }
         setVisibility(VISIBLE);
         applyReveal(0f);
         panel.requestFocus();
         slideTo(1f);
-        if (!sessionsShown) deck.replay();
     }
 
     void close(boolean animate) {
         if (!isOpen() || (hiding && animate)) return;
+        savePosition();
         hiding = true;
         if (animate) slideTo(0f);
         else {
@@ -266,6 +333,7 @@ final class AccountSidebar extends FrameLayout {
     }
 
     @Override protected void onDetachedFromWindow() {
+        savePosition();
         cancelTransition();
         super.onDetachedFromWindow();
     }
@@ -278,10 +346,9 @@ final class AccountSidebar extends FrameLayout {
         this.studioActive = studioActive;
         this.proxyActive = proxyActive;
 
-        boolean switched = deck.bind(accounts, current, usable, quotas);
+        deck.bind(accounts, current, usable, quotas);
         deck.setVisibility(accounts.isEmpty() ? GONE : VISIBLE);
         accountEmpty.setVisibility(accounts.isEmpty() ? VISIBLE : GONE);
-        if (switched && accountScroll.getScrollY() > 0) accountScroll.smoothScrollTo(0, 0);
 
         shownSessions = new java.util.ArrayList<>(sessions);
         shownSelected = selectedSession;
@@ -441,8 +508,7 @@ final class AccountSidebar extends FrameLayout {
     }
 
     void showSessions(boolean sessions) {
-        sessionsShown = sessions;
-        updateSection();
+        selectTab(sessions);
     }
 
     private void updateSection() {

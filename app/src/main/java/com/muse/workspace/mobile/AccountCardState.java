@@ -126,7 +126,7 @@ final class AccountCardState {
                 if("unlimited".equals(state)||"known".equals(state)&&used!=null&&used<=100){Map<String,Object> copy=new LinkedHashMap<>();copy.put("state",state);copy.put("used_percent","unlimited".equals(state)?null:used);normalized=Collections.unmodifiableMap(copy);}}}
             case "plan"->normalized=text(value,32);
             case "reset"->{Long n=integer(value);if(n!=null&&n>0)normalized=n;}
-            case "extra_remaining","extra_total"->normalized=number(value);
+            case "extra_remaining","extra_total"->{Double raw=number(value);if(validExtraUnits(raw))normalized=raw;}
             case "extra_display"->normalized=text(value,96);
             case "invite_code"->{String code=text(value,16);if(code!=null&&code.toUpperCase(Locale.ROOT).matches("[A-Z0-9]{6,16}"))normalized=code.toUpperCase(Locale.ROOT);}
             case "invite_remaining","invite_use_count","invite_max_uses","invite_redeemed"->normalized=integer(value);
@@ -139,6 +139,7 @@ final class AccountCardState {
     private static String decimal(double n){return BigDecimal.valueOf(n).stripTrailingZeros().toPlainString();}
     private static String text(Object value,int max){if(!(value instanceof String s))return null;String clean=s.trim();return clean.isEmpty()||clean.length()>max||clean.chars().anyMatch(Character::isISOControl)?null:clean;}
     private static Double number(Object value){if(!(value instanceof Number n))return null;double d=n.doubleValue();return Double.isFinite(d)&&d>=0?d:null;}
+    static boolean validExtraUnits(Double raw){return raw!=null&&raw>=0&&raw==Math.floor(raw)&&raw<=9007199254740991L/25;}
     private static Long integer(Object value){Double n=number(value);return n!=null&&n<=9007199254740991L&&n==Math.floor(n)?n.longValue():null;}
     private static long fieldTime(Map<String,Object> data,String field,long fallback){String key=field+"_observed_at";if(!data.containsKey(key))return fallback;Long at=integer(data.get(key));return at==null?0:at;}
     private static long time(Map<String,Object> data,long now){Long at=integer(data.get("observed_at"));return at==null||at<=0||at>now+30000?0:at;}

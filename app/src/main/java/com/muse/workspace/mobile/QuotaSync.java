@@ -33,7 +33,7 @@ final class QuotaSync {
         final boolean readInvite, manual;
         boolean inviteFinished;
         boolean first = true;
-        boolean evaluating, updated;
+        boolean evaluating, updated, usageUpdated;
         long quotaReadyAt;
         MuseWeb.WorkPage page;
 
@@ -126,6 +126,7 @@ final class QuotaSync {
         if (!merged.rows().equals(previous.rows())) {
             cache.edit().putString(probe.account, new JSONObject(merged.rows()).toString()).apply();
             probe.updated = true;
+            if (merged.observed("usage") > previous.observed("usage")) probe.usageUpdated = true;
             changed.accept(probe.account);
         }
         String status = result.optString("status");
@@ -143,7 +144,7 @@ final class QuotaSync {
             end(probe, probe.updated ? "部分已更新 · 额度待重试" : "未更新 · 未取得有效数据"); return;
         }
         AccountQuota data = merged.quota(now);
-        if (data != null && data.fresh(now) && data.observed() >= probe.wallStarted - 1000) {
+        if (probe.usageUpdated && data != null && data.fresh(now) && data.observed() >= probe.wallStarted - 1000) {
             if (probe.quotaReadyAt == 0) probe.quotaReadyAt = SystemClock.elapsedRealtime();
             long held = SystemClock.elapsedRealtime() - probe.quotaReadyAt;
             if (held < 1500 || !avatars.has(probe.account) && held < 5_000) return;

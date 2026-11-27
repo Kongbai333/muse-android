@@ -80,6 +80,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private LinearLayout main;
     private AccountSidebar sidebar;
     private AccountEditor accountEditor;
+    private String openingQuickAccount = "";
+    private androidx.appcompat.app.AlertDialog deleteConfirmation;
+    private AccountStore.Account deleteTarget;
     private FrameLayout quickSwitch;
     private ImageView quickSwitchPhoto;
     private TextView quickSwitchInitial, quickSwitchCount;
@@ -748,7 +751,11 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private void switchQuickAccount(AccountStore.Account account) {
         if (account == current() && screen == WEB && browser.view() != null) return;
         syncStudioDraft();
-        if (account != current() && !select(account)) return;
+        boolean different = account != current();
+        openingQuickAccount = "";
+        if (different && (!accounts.all().contains(account) || !accounts.usable(account, multiProfile)
+                || exhausted(account) || browser.transferring() || !select(account))) return;
+        if (different) openingQuickAccount = account.id;
         showScreen(WEB);
     }
 
@@ -802,7 +809,6 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         dismissAccountMenu();
         if (quickSwitch != null) quickSwitch.setVisibility(View.GONE);
         renderSidebar();
-        sidebar.showSessions(screen == STUDIO);
         main.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         main.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         main.setFocusable(false);
@@ -922,6 +928,39 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     @Override public void notice(String text) { message(text); }
+
+    @Override public void deleteAccount(AccountStore.Account account) {
+        if (!canDeleteAccount(account)) return;
+        androidx.appcompat.app.AlertDialog confirm = MobileUi.dialog(this).setTitle("删除「" + account.name + "」？")
+            .setMessage("只从本机列表移除这个账号，不会删除远端账号或其他账号，也不会清除旧浏览器配置。")
+            .setNegativeButton("取消", null).setPositiveButton("删除", (dialog, button) -> {
+                if (!canDeleteAccount(account)) return;
+                boolean resetBrowser = account == current();
+                if (account.id.equals(openingQuickAccount)) openingQuickAccount = "";
+                sidebar.forgetAccount(account.id);
+                loginPageOwners.remove(account.id);
+                accounts.remove(account);
+                quotas.remove(account.id);
+                browser.forget(account.id);
+                avatars.remove(account.id);
+                accountChanged(resetBrowser);
+            }).show();
+        confirm.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setTextColor(ACCENT);
+        deleteConfirmation = confirm;
+        deleteTarget = account;
+        confirm.setOnDismissListener(ignored -> {
+            if (deleteConfirmation == confirm) { deleteConfirmation = null; deleteTarget = null; }
+        });
+    }
+
+    private boolean canDeleteAccount(AccountStore.Account account) {
+        if (account == null || !accounts.all().contains(account)) return false;
+        if (!multiProfile) { message("当前 WebView 不支持独立账号，不能删除。"); return false; }
+        if (studio.accountInUse(account.id) || browser.checking() || browser.transferring()) {
+            message("请等账号任务或网络操作结束后再删除。"); return false;
+        }
+        return true;
+    }
 
     @Override public void refreshAccount(AccountStore.Account account) {
         String blocked = null;
@@ -1788,6 +1827,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         themeReopenSidebar = false;
         int sidebarIndex = root.indexOfChild(sidebar);
         ViewGroup.LayoutParams sidebarLayout = sidebar.getLayoutParams();
+        AccountSidebar previous = sidebar;
         root.removeView(sidebar);
         sidebar = new AccountSidebar(this, ui, this, proxies);
         sidebar.setTopInset(topInset);
@@ -1803,11 +1843,18 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             main.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
             main.setFocusable(false);
             sidebar.openImmediately();
+            sidebar.restoreDetailsFrom(previous);
         } else {
             main.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
             main.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
             main.setFocusableInTouchMode(true);
             updateQuickSwitchVisibility();
+        }
+        if (accountEditor != null) accountEditor.retheme(this, accounts);
+        if (deleteConfirmation != null && deleteConfirmation.isShowing()) {
+            AccountStore.Account target = deleteTarget;
+            deleteConfirmation.dismiss();
+            deleteAccount(target);
         }
     }
 
@@ -1824,39 +1871,26 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         }
     }
 
-    @Override public void editAccount(AccountStore.Account account) {
-        if (account == null && !multiProfile) return;
+    @Override public void editAccount(AccountStore.Account account) { openEditor(account); }
+
+    AccountEditor openEditor(AccountStore.Account account) {
+        if (account == null && !multiProfile) return null;
         if (studio.running() != null && (account == null || studio.accountInUse(account.id))) {
             message("请等当前任务结束，或先停止生成再修改账号。");
-            return;
+            return null;
         }
-        Runnable remove = account == null || !multiProfile ? null : () -> MobileUi.dialog(this)
-                .setTitle("移除「" + account.name + "」？").setMessage("账号将从列表中移除。此操作不会清除旧浏览器配置。")
-                .setNegativeButton("取消", null).setPositiveButton("移除", (confirm, button) -> {
-                    boolean resetBrowser = account == current();
-                    loginPageOwners.remove(account.id);
-                    accounts.remove(account);
-                    browser.forget(account.id);
-                    quotas.remove(account.id);
-                    avatars.remove(account.id);
-                    accountChanged(resetBrowser);
-                }).show();
+        Runnable remove = account == null || !multiProfile ? null : () -> deleteAccount(account);
         Runnable refresh = account != null && accounts.all().contains(account) && accounts.usable(account, multiProfile)
             ? () -> refreshAccount(account) : null;
-        AccountEditor opened = AccountEditor.show(this, ui, account, remove, proxies, accounts, quotas, this::openProxyManager, refresh, (name, proxyId, appearance, routeEdited) -> {
-            // 普通卡面是本地外观偏好，不能因此取消任务、刷新额度或重建网页登录。
+        AccountEditor opened = AccountEditor.show(this, ui, account, remove, proxies, accounts, quotas, this::openProxyManager, refresh, (name, proxyId, routeEdited) -> {
             boolean sameRoute = account != null && (!routeEdited || account.proxyId().equals(proxyId == null ? "" : proxyId)
                 && !(account.hasProxy() && account.proxyId().isEmpty()));
             if (account != null && account.name.equals(name) && sameRoute) {
-                AccountAppearance.save(this, account.id, appearance);
-                renderSidebar();
                 return;
             }
-            quotas.cancel();
+            if (!sameRoute) quotas.cancel();
             if (account == null) {
                 accounts.add(name, proxyId);
-                AccountStore.Account added = current();
-                if (added != null) AccountAppearance.save(this, added.id, appearance);
                 // 新账号会成为当前账号：同一路由时保留原账号的网页。
                 clearFile();
                 browser.switchTo(current(), multiProfile);
@@ -1864,16 +1898,15 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
                 accountChanged(false);
                 return;
             }
-            String newProxy = proxyId == null ? "" : proxyId;
-            boolean routeChanged = !account.proxyId().equals(newProxy) || (account.hasProxy() && account.proxyId().isEmpty());
+            boolean routeChanged = !sameRoute;
             boolean resetBrowser = routeChanged && account == current();
-            accounts.update(account, name, proxyId);
-            AccountAppearance.save(this, account.id, appearance);
+            accounts.update(account, name, proxyId, routeChanged);
             if (routeChanged) browser.forget(account.id);
             accountChanged(resetBrowser);
         });
         accountEditor = opened;
         opened.onDismiss(() -> { if (accountEditor == opened) accountEditor = null; });
+        return opened;
     }
 
     @Override public void exportAccounts() { if (transferUi != null) transferUi.exportAccounts(); }
@@ -2134,6 +2167,12 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (closing) return;
         AccountStore.Account account = current();
         String url = browser.url();
+        if (!openingQuickAccount.isEmpty() && screen == WEB && webFrame != null) {
+            if (account != null && openingQuickAccount.equals(account.id) && browser.isOpen(account.id)) {
+                sidebar.afterQuickSwitch(account.id);
+                openingQuickAccount = "";
+            } else if (account == null || !openingQuickAccount.equals(account.id) || !browser.preparing()) openingQuickAccount = "";
+        }
         if (account != null && url != null && browser.isOpen(account.id) && StudioDraft.trustedUrl(url)) {
             if (browser.consumeLoginRequired()) { loginPageOwners.add(account.id); quotas.loginRequired(account.id); }
             else if (loginPageOwners.contains(account.id) && !StudioDraft.loginPage(url) && browser.pageReady()) {
@@ -2340,6 +2379,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
     @Override protected void onPause() {
         foreground = false;
+        if (sidebar != null) sidebar.savePosition();
         if (updater != null) updater.pause();
         quotaHandler.removeCallbacks(quotaPulse);
         if (quotas != null) quotas.cancel();

@@ -110,7 +110,7 @@ final class QuotaCard {
         inviteLabel.setTooltipText(inviteDetails);
         inviteLabel.setOnClickListener(ignored -> {
             if (code.isEmpty() && card.inviteExhausted()) showLabelDetails("邀请已满", inviteDetails);
-            else copyInviteCode(code);
+            else copyInviteCode(context, code);
         });
         inviteLabel.setOnLongClickListener(ignored -> { showLabelDetails("邀请信息", inviteDetails); return true; });
         long at = data == null ? 0 : data.observed();
@@ -154,7 +154,7 @@ final class QuotaCard {
         MobileUi.dialog(context).setTitle(title).setMessage(text).setPositiveButton("关闭", null).show();
     }
 
-    private void copyInviteCode(String code) {
+    static void copyInviteCode(Context context, String code) {
         if (code == null || code.isEmpty()) {
             Toast.makeText(context, "邀请码待获取", Toast.LENGTH_SHORT).show();
             return;
