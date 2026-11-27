@@ -34,7 +34,7 @@ import java.util.function.Predicate;
 import static com.muse.workspace.mobile.MobileUi.*;
 
 /**
- * 账号叠放：当前账号完整显示在顶部；其余按剩余额度叠成 38dp 的条，额度用完或不可用的压成 30dp 沉底。
+ * 账号叠放：当前账号在顶部，其余额度用完或不可用的沉底。叠放只覆盖卡片底部留白。
  * 点条切换（被点的卡抬起、飞到顶部展开，旧的当前卡收成条插回队列）；点当前卡打开网页；长按刷新额度或编辑。
  * 卡片视图按账号复用，重新绑定时只移动位置，所以侧栏任何一次刷新都会走同一套动画。
  */
@@ -52,7 +52,6 @@ final class AccountDeck extends FrameLayout {
     private static final String SPREAD_KEY = "account-deck-spread";
     private static final int STRIP = 38, OUT = 30, TAIL = 8, GAP = 10, LABEL = 26, OUT_GAP = 12, SPREAD_GAP = 6;
     private static final int MOTION = 440;
-    private enum Detail { NONE, INVITE, QUOTA }
     private static final PathInterpolator EASE = new PathInterpolator(0.2f, 0.8f, 0.2f, 1f);
 
     private final MobileUi ui;
@@ -65,7 +64,7 @@ final class AccountDeck extends FrameLayout {
     private final LinearLayout liveLabel;
     private final TextView liveText, outLabel, spreadToggle;
     private QuotaSync quotas;
-    private androidx.appcompat.app.AlertDialog actionMenu;
+    private androidx.appcompat.app.AlertDialog actionMenu, quotaDialog;
     private String menuId = "";
     private Predicate<AccountStore.Account> usable = account -> true;
     private String currentId = "", flying = "";
@@ -169,19 +168,14 @@ final class AccountDeck extends FrameLayout {
     String currentId() { return currentId; }
 
     void restoreDetailsFrom(AccountDeck previous) {
-        for (Card card : order) {
-            Card old = previous.cards.get(card.id);
-            if (old != null && old.detail != Detail.NONE) {
-                card.detail = old.detail;
-                refresh(card);
-            }
-        }
-        if (previous.actionMenu != null && previous.actionMenu.isShowing()) {
-            Card card = cards.get(previous.menuId);
+        Card card = cards.get(previous.menuId);
+        if (previous.quotaDialog != null && previous.quotaDialog.isShowing()) {
+            previous.quotaDialog.dismiss();
+            if (card != null) showQuota(card);
+        } else if (previous.actionMenu != null && previous.actionMenu.isShowing()) {
             previous.actionMenu.dismiss();
             if (card != null) menu(card);
         }
-        requestLayout();
     }
 
     // ---------------------------------------------------------------- 数据
@@ -266,25 +260,25 @@ final class AccountDeck extends FrameLayout {
             if (active != null) y += ui.dp(GAP);
             liveY = y;
             y += ui.dp(LABEL);
-            for (int i = 0; i < live.size(); i++) {
-                Card card = live.get(i);
-                card.targetY = y;
-                boolean last = i == live.size() - 1;
-                y += last ? card.getMeasuredHeight() : spread || card.detail != Detail.NONE ? card.getMeasuredHeight() + ui.dp(SPREAD_GAP) : ui.dp(STRIP);
-            }
+            y = placeGroup(live, y);
         }
         if (!out.isEmpty()) {
             if (y > 0) y += ui.dp(OUT_GAP);
             outY = y;
             y += ui.dp(LABEL - 4);
-            for (int i = 0; i < out.size(); i++) {
-                Card card = out.get(i);
-                card.targetY = y;
-                boolean last = i == out.size() - 1;
-                y += last ? card.getMeasuredHeight() : spread || card.detail != Detail.NONE ? card.getMeasuredHeight() + ui.dp(SPREAD_GAP) : ui.dp(OUT);
-            }
+            y = placeGroup(out, y);
         }
         return y;
+    }
+
+    private int placeGroup(List<Card> group, int top) {
+        for (int index = 0; index < group.size(); index++) {
+            Card card = group.get(index);
+            card.targetY = top;
+            top += card.getMeasuredHeight();
+            if (index + 1 < group.size()) top += spread ? ui.dp(SPREAD_GAP) : -ui.dp(TAIL / 2);
+        }
+        return top;
     }
 
     @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
@@ -294,11 +288,6 @@ final class AccountDeck extends FrameLayout {
             if (child.getVisibility() != GONE) child.layout(0, 0, width, child.getMeasuredHeight());
         }
         boolean animate = animateNext && laidOut && ValueAnimator.areAnimatorsEnabled() && isShown();
-        for (Card card : order) if (card.detail != Detail.NONE) {
-            settlePositions();
-            animate = false;
-            break;
-        }
         boolean stagger = staggerNext;
         animateNext = false;
         staggerNext = false;
@@ -402,26 +391,35 @@ final class AccountDeck extends FrameLayout {
         card.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         android.text.SpannableString delete = new android.text.SpannableString("删除账号");
         delete.setSpan(new android.text.style.ForegroundColorSpan(ACCENT), 0, delete.length(), 0);
-        CharSequence[] actions = card.usable ? new CharSequence[]{"刷新额度", "编辑账号", "额度明细", "显示邀请码", delete}
-            : new CharSequence[]{"额度明细", "显示邀请码", delete};
+        CharSequence[] actions = card.usable ? new CharSequence[]{"刷新额度", "编辑账号", "额度明细", delete}
+            : new CharSequence[]{"额度明细", delete};
         menuId = account.id;
         actionMenu = MobileUi.dialog(getContext()).setTitle(account.name).setItems(actions, (dialog, which) -> {
             if (cards.get(account.id) != card) return;
             switch (actions[which].toString()) {
                 case "刷新额度" -> host.refreshAccount(account);
                 case "编辑账号" -> host.editAccount(account);
-                case "额度明细" -> toggleDetail(card, Detail.QUOTA);
-                case "显示邀请码" -> toggleDetail(card, Detail.INVITE);
+                case "额度明细" -> showQuota(card);
                 case "删除账号" -> host.deleteAccount(account);
             }
         }).show();
         actionMenu.setOnDismissListener(ignored -> actionMenu = null);
     }
 
-    private void toggleDetail(Card card, Detail detail) {
-        card.detail = card.detail == detail ? Detail.NONE : detail;
-        refresh(card);
-        requestLayout();
+    private void showQuota(Card card) {
+        menuId = card.id;
+        AccountCardState saved = quotas.card(card.id);
+        long now = System.currentTimeMillis();
+        AccountQuota data = saved.quota(now);
+        String state = quotas.state(card.id);
+        String reset = data == null ? "" : data.resetLabel(now);
+        String message = "周额度：" + (data == null ? "待获取" : data.weekly(now)) + AccountCardLabels.time(saved.observed("usage"))
+            + (reset.isEmpty() ? "" : "\n" + reset) + "\n同步状态："
+            + (data != null && !data.currentWeek(now) && "额度已同步".equals(state) ? "显示上次成功数据" : state)
+            + "\n\n" + AccountCardLabels.extraDetails(saved);
+        quotaDialog = MobileUi.dialog(getContext()).setTitle(card.account.name + " · 额度明细").setMessage(message)
+            .setPositiveButton("关闭", null).show();
+        quotaDialog.setOnDismissListener(ignored -> quotaDialog = null);
     }
 
     private void shake(Card card) {
@@ -436,12 +434,10 @@ final class AccountDeck extends FrameLayout {
 
     private final class Card extends LinearLayout {
         final String id;
-        final LinearLayout face, head, body, words, nameLine, detailBox;
+        final LinearLayout face, head, body, words, nameLine;
         final Ring ring;
-        final TextView name, tag, network, percent, reset, invite;
+        final TextView name, tag, network, percent, reset, invite, inviteCount, extra;
         final View ticks;
-        final TextView detailTitle, detailText, copy;
-        Detail detail = Detail.NONE;
         AccountStore.Account account;
         int listIndex, slot = -1, lastSlot = -1;
         float targetY;
@@ -487,33 +483,29 @@ final class AccountDeck extends FrameLayout {
             body = ui.column();
             ticks = ui.tickBar();
             body.addView(ticks, new LinearLayout.LayoutParams(-1, ui.dp(7)));
-            LinearLayout meta = ui.row();
             reset = ui.single(ui.meta("", 9.5f, MUTED));
-            meta.addView(reset, new LinearLayout.LayoutParams(0, -2, 1));
-            invite = ui.text("显示邀请码", 12, INK, true);
-            invite.setGravity(Gravity.CENTER);
-            invite.setMinHeight(ui.dp(48));
-            invite.setPadding(ui.dp(8), 0, ui.dp(8), 0);
-            ui.touch(invite, Color.TRANSPARENT, R_SM, 0, () -> toggleDetail(this, Detail.INVITE));
-            meta.addView(invite, new LinearLayout.LayoutParams(-2, -2));
-            LinearLayout.LayoutParams metaPosition = new LinearLayout.LayoutParams(-1, -2);
-            metaPosition.topMargin = ui.dp(8);
-            body.addView(meta, metaPosition);
-            LinearLayout.LayoutParams bodyPosition = new LinearLayout.LayoutParams(-1, -2);
-            bodyPosition.topMargin = ui.dp(2);
-            face.addView(body, bodyPosition);
-            detailBox = ui.column();
-            detailBox.setPadding(ui.dp(11), ui.dp(10), ui.dp(11), ui.dp(8));
-            detailTitle = ui.text("", 14, INK, true);
-            detailText = ui.meta("", 12, TEXT2);
-            detailBox.addView(detailTitle);
-            ui.block(detailBox, detailText, 6);
-            copy = ui.outline("复制完整邀请码", () -> {
-                if (cards.get(id) == this) QuotaCard.copyInviteCode(getContext(), quotas.card(id).inviteCode());
+            ui.block(body, reset, 6);
+            ui.block(face, body, 2);
+
+            LinearLayout inviteRow = ui.row();
+            inviteRow.addView(ui.text("邀请码", 12, TEXT2, false), new LinearLayout.LayoutParams(-2, -2));
+            invite = ui.metaStrong("", 12.5f, INK);
+            invite.setGravity(Gravity.CENTER_VERTICAL);
+            invite.setMinHeight(ui.dp(32));
+            ui.touch(invite, Color.TRANSPARENT, R_SM, 0, () -> {
+                if (cards.get(id) != this) return;
+                String code = quotas.card(id).inviteCode();
+                if (!code.isEmpty() && code.contentEquals(invite.getText())) QuotaCard.copyInviteCode(getContext(), code);
             });
-            ui.block(detailBox, copy, 8);
-            ui.block(detailBox, ui.outline("收起详情", () -> toggleDetail(this, Detail.NONE)), 8);
-            addView(detailBox, new LinearLayout.LayoutParams(-1, -2));
+            invite.setOnLongClickListener(view -> { menu(this); return true; });
+            LinearLayout.LayoutParams codePosition = new LinearLayout.LayoutParams(-2, -2);
+            codePosition.setMarginStart(ui.dp(6));
+            inviteRow.addView(invite, codePosition);
+            ui.block(face, inviteRow, 2);
+            inviteCount = ui.meta("", 12, TEXT2);
+            extra = ui.meta("", 12, TEXT2);
+            ui.block(face, inviteCount, 0);
+            ui.block(face, extra, 4);
         }
 
         boolean sunk() { return exhausted || !usable; }
@@ -540,17 +532,16 @@ final class AccountDeck extends FrameLayout {
             network.setText(!usable ? "需更新 WebView" : profile != null
                 ? profile.scheme.toUpperCase(Locale.ROOT) + " · " + profile.name : account.networkLabel(proxies));
             resetText = data == null ? "" : data.resetLabel(now);
-            invite.setText(detail == Detail.INVITE ? "收起邀请码" : "显示邀请码");
-            detailBox.setVisibility(detail == Detail.NONE ? GONE : VISIBLE);
-            if (detail != Detail.NONE) {
-                boolean invitation = detail == Detail.INVITE;
-                detailTitle.setText(invitation ? AccountCardLabels.invitation(saved) : "额度明细 · " + AccountCardLabels.extra(saved));
-                detailText.setText(invitation ? AccountCardLabels.inviteDetails(saved) : "周额度：" + (known ? data.weekly(now) : "待获取")
-                    + AccountCardLabels.time(saved.observed("usage")) + (resetText.isEmpty() ? "" : "\n" + resetText)
-                    + "\n同步状态：" + (!current && "额度已同步".equals(state) ? "显示上次成功数据" : state)
-                    + "\n\n" + AccountCardLabels.extraDetails(saved));
-                copy.setVisibility(invitation && !saved.inviteCode().isEmpty() ? VISIBLE : GONE);
-            }
+            String code = saved.inviteCode();
+            boolean available = !code.isEmpty();
+            invite.setText(available ? code : saved.inviteExhausted() ? "已满，暂无可用码" : "待获取");
+            invite.setEnabled(available);
+            invite.setFocusable(available);
+            invite.setTextColor(available ? INK : MUTED);
+            invite.setPaintFlags(available ? invite.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG : invite.getPaintFlags() & ~Paint.UNDERLINE_TEXT_FLAG);
+            invite.setContentDescription(available ? "邀请码 " + code + "，点按复制" : null);
+            inviteCount.setText("已邀请 " + AccountCardLabels.inviteCount(saved) + " 人");
+            extra.setText(AccountCardLabels.extraSummary(saved));
             ring.setFace(account, active, sunk());
 
             String next = active ? "active" : sunk() ? "out" : "strip";
@@ -573,7 +564,8 @@ final class AccountDeck extends FrameLayout {
                 + (!usable ? "需更新 WebView 后可用" : !known ? "额度" + percent.getText()
                 : unlimited ? "不限量" : exhausted ? "本周额度已用完" : "已用 " + Math.round(used) + "%，" + quotaLevel(used))
                 + (active ? "，当前账号，点按打开网页" : sunk() ? "" : "，点按切换") + (usable ? "，长按刷新或编辑" : "");
-            face.setContentDescription(describe + (prefix.isEmpty() ? "" : "，" + prefix.trim() + "记录") + "，长按查看账号操作");
+            face.setContentDescription(describe + (prefix.isEmpty() ? "" : "，" + prefix.trim() + "记录")
+                + "，" + inviteCount.getText() + "，" + extra.getText() + (available ? "" : "，邀请码" + invite.getText()) + "，长按查看账号操作");
         }
 
         private void applyMode(boolean active, boolean detailed) {

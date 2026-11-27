@@ -73,7 +73,7 @@ final class AccountSidebar extends FrameLayout {
         this.host = host;
         this.proxies = proxies;
         positions = context.getSharedPreferences(MobileUi.PREFS, Context.MODE_PRIVATE);
-        sessionsShown = positions.getBoolean("sidebar-sessions", true);
+        sessionsShown = positions.getBoolean("sidebar-sessions", false);
         sessionPosition = positions.getInt("sidebar-session-y", 0);
         anchor = new AccountDeck.Anchor(positions.getString("sidebar-anchor", ""), positions.getInt("sidebar-slot", 0), positions.getInt("sidebar-offset", -ui.dp(12)));
 

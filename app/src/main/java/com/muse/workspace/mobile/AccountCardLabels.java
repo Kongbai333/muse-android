@@ -13,10 +13,19 @@ final class AccountCardLabels {
         return "额外 "+compact(consumed(card))+"/"+compact(tokens(card.extraTotal()));
     }
 
+    static String extraSummary(AccountCardState card) {
+        return "额外额度　已用 " + count(consumed(card)) + " / 总量 " + count(tokens(card.extraTotal())) + " 口令";
+    }
+
+    static String inviteCount(AccountCardState card) {
+        Long limit = card.inviteMaxUses();
+        return count(card.inviteUseCount()) + "/" + (limit == null ? 30 : limit);
+    }
+
     static String invitation(AccountCardState card) {
         String code=card.inviteCode();
         if(code.isEmpty()&&card.inviteExhausted())return "邀请已满"+count(card.inviteUseCount())+"/"+count(card.inviteMaxUses());
-        return (code.isEmpty()?"待获取":code)+" "+count(card.inviteUseCount())+"/"+count(card.inviteMaxUses()==null?30L:card.inviteMaxUses());
+        return (code.isEmpty()?"待获取":code)+" "+inviteCount(card);
     }
 
     static String extraDetails(AccountCardState card) {
