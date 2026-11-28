@@ -7,7 +7,6 @@ import android.net.Uri;
 import android.view.View;
 import android.webkit.PermissionRequest;
 import android.webkit.WebView;
-import android.widget.Toast;
 
 final class WebMicrophone {
     private static final int REQUEST_CODE = 612;
@@ -88,6 +87,6 @@ final class WebMicrophone {
     }
 
     private void showPermissionHint() {
-        Toast.makeText(activity, "未允许麦克风，可在系统设置中打开 Muse 的麦克风权限。", Toast.LENGTH_LONG).show();
+        MobileUi.notice(activity, "未允许麦克风，可在系统设置中打开 Muse 的麦克风权限。");
     }
 }

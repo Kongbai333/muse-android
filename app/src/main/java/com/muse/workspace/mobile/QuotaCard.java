@@ -7,7 +7,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -156,20 +155,20 @@ final class QuotaCard {
 
     static void copyInviteCode(Context context, String code) {
         if (code == null || code.isEmpty()) {
-            Toast.makeText(context, "邀请码待获取", Toast.LENGTH_SHORT).show();
+            MobileUi.notice(context, "邀请码待获取");
             return;
         }
         try {
             ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
             if (clipboard == null) {
-                Toast.makeText(context, "无法使用剪贴板", Toast.LENGTH_SHORT).show();
+                MobileUi.notice(context, "无法使用剪贴板");
                 return;
             }
             clipboard.setPrimaryClip(ClipData.newPlainText("Muse 邀请码", code));
         } catch (RuntimeException unavailable) {
-            Toast.makeText(context, "无法复制邀请码", Toast.LENGTH_SHORT).show();
+            MobileUi.notice(context, "无法复制邀请码");
             return;
         }
-        Toast.makeText(context, "已复制邀请码", Toast.LENGTH_SHORT).show();
+        MobileUi.notice(context, "已复制邀请码");
     }
 }

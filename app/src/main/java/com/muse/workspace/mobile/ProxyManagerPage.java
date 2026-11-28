@@ -22,9 +22,25 @@ final class ProxyManagerPage extends LinearLayout {
         super(context);
         setOrientation(VERTICAL);
         setBackgroundColor(BG);
-        setPadding(ui.dp(16), ui.dp(2), ui.dp(16), ui.dp(28));
+        setPadding(ui.dp(14), ui.dp(8), ui.dp(14), ui.dp(20));
 
         List<ProxyProfile> profiles = store.all();
+        LinearLayout routing = ui.column();
+        routing.setPadding(ui.dp(14), ui.dp(14), ui.dp(14), ui.dp(14));
+        routing.setBackground(ui.shape(SURFACE, 16, LINE));
+        LinearLayout heading = ui.row();
+        String routeState = host.routing();
+        boolean hub = "本机分流".equals(routeState);
+        View dot = new View(context); dot.setBackground(ui.shape(hub ? quotaColor(0d) : MUTED, 99, 0));
+        heading.addView(dot, new LayoutParams(ui.dp(8), ui.dp(8)));
+        TextView title = ui.text(hub ? "本机代理分流已启用" : "代理分流状态", 13.5f, INK, true);
+        LayoutParams titlePosition = new LayoutParams(0, -2, 1); titlePosition.setMarginStart(ui.dp(8)); heading.addView(title, titlePosition);
+        TextView tag = ui.meta("HUB", 10, TEXT2); tag.setPadding(ui.dp(6), ui.dp(2), ui.dp(6), ui.dp(2)); tag.setBackground(ui.shape(RAISED, 4, 0)); heading.addView(tag);
+        routing.addView(heading);
+        ui.block(routing, ui.text(hub ? "不同代理的账号可同时在线，切换不重新加载网页。建议定期检测出口，确认每个账号只走自己的代理。" : routeState, 12, TEXT2, false), 10);
+        TextView check = ui.primary("检测各账号代理出口", host::check);
+        check.setTextSize(13); check.setMinHeight(ui.dp(40)); check.setMinimumHeight(ui.dp(40));
+        ui.block(routing, check, 10); ui.block(this, routing, 0);
         if (profiles.isEmpty()) {
             LinearLayout empty = ui.column();
             empty.setPadding(ui.dp(4), ui.dp(56), ui.dp(4), 0);
@@ -37,19 +53,7 @@ final class ProxyManagerPage extends LinearLayout {
             return;
         }
 
-        // 分流状态 + 出口检测入口。
-        LinearLayout routing = ui.row();
-        routing.setPadding(ui.dp(14), ui.dp(12), ui.dp(10), ui.dp(12));
-        routing.setBackground(ui.shape(RAISED, 10, LINE));
-        TextView state = ui.text(host.routing(), 12, TEXT2, false);
-        state.setLineSpacing(ui.dp(3), 1f);
-        state.setTooltipText(state.getText());
-        routing.addView(state, new LayoutParams(0, -2, 1));
-        TextView check = ui.small("检测出口", 0, false, host::check);
-        LayoutParams checkPosition = new LayoutParams(-2, ui.dp(34));
-        checkPosition.setMarginStart(ui.dp(10));
-        routing.addView(check, checkPosition);
-        ui.block(this, routing, 6);
+        ui.block(this, ui.meta("代理线路 " + profiles.size(), 10, MUTED), 14);
         for (ProxyProfile profile : profiles) ui.block(this, row(ui, profile, accounts, host), 8);
     }
 
@@ -57,36 +61,45 @@ final class ProxyManagerPage extends LinearLayout {
         TextView protocol = ui.text(scheme.toUpperCase(java.util.Locale.ROOT), 10.5f, INK, true);
         protocol.setTypeface(MobileUi.MONO_MEDIUM);
         protocol.setGravity(Gravity.CENTER);
-        protocol.setBackground(ui.shape(ACCENT_SOFT, 7, LINE));
+        protocol.setBackground(ui.shape(android.graphics.Color.TRANSPARENT, 4, LINE_STRONG));
         protocol.setPadding(0, ui.dp(5), 0, ui.dp(5));
         protocol.setLayoutParams(new LinearLayout.LayoutParams(ui.dp(62), -2));
         return protocol;
     }
 
     private View row(MobileUi ui, ProxyProfile profile, AccountStore accounts, Host host) {
-        LinearLayout row = ui.row();
-        row.setPadding(ui.dp(12), ui.dp(14), ui.dp(14), ui.dp(14));
-        row.addView(protocolTag(ui, profile.scheme));
-
-        LinearLayout words = ui.column();
-        words.setPadding(ui.dp(12), 0, ui.dp(8), 0);
-        words.addView(ui.single(ui.text(profile.name, 14.5f, INK, true)));
+        LinearLayout row = ui.column();
+        row.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(12));
+        LinearLayout heading = ui.row();
+        TextView protocol = ui.metaStrong(profile.scheme.toUpperCase(java.util.Locale.ROOT), 10, TEXT2);
+        protocol.setPadding(ui.dp(6), ui.dp(2), ui.dp(6), ui.dp(2)); protocol.setBackground(ui.shape(android.graphics.Color.TRANSPARENT, 4, LINE_STRONG));
+        heading.addView(protocol);
+        TextView name = ui.single(ui.text(profile.name, 14, INK, true));
+        LayoutParams namePosition = new LayoutParams(0, -2, 1); namePosition.setMarginStart(ui.dp(8)); heading.addView(name, namePosition);
+        if (profile.credential != null && !profile.credential.isEmpty()) heading.addView(ui.iconView(R.drawable.ic_lock, MUTED, 12));
+        heading.addView(action(ui, "编辑", TEXT2, () -> host.edit(profile)));
+        heading.addView(action(ui, "删除", MUTED, () -> host.remove(profile)));
+        row.addView(heading, new LayoutParams(-1, -2));
         String address = (profile.host.indexOf(':') >= 0 ? "[" + profile.host + "]" : profile.host) + ":" + profile.port;
-        TextView endpoint = ui.single(ui.text(address, 12, TEXT2, false));
-        endpoint.setTypeface(MobileUi.MONO);
-        LinearLayout.LayoutParams endpointPosition = new LinearLayout.LayoutParams(-1, -2);
-        endpointPosition.topMargin = ui.dp(5);
-        words.addView(endpoint, endpointPosition);
-        row.addView(words, new LayoutParams(0, -2, 1));
+        TextView endpoint = ui.single(ui.meta(address, 11, MUTED));
+        ui.block(row, endpoint, 6);
+        View divider = new View(getContext()); divider.setBackgroundColor(LINE);
+        LayoutParams dividerPosition = new LayoutParams(-1, ui.dp(1)); dividerPosition.topMargin = ui.dp(8); row.addView(divider, dividerPosition);
 
         int count = accounts.referenceCount(profile.id);
-        TextView refs = ui.text(count == 0 ? "暂无账号引用" : count + " 个账号", 12, count == 0 ? MUTED : INK, count != 0);
-        refs.setGravity(Gravity.END);
-        row.addView(refs, new LayoutParams(-2, -2));
+        TextView refs = ui.meta(count + " 个账号使用", 10, TEXT2);
+        ui.block(row, refs, 6);
         row.setContentDescription(profile.name + "，" + profile.scheme.toUpperCase(java.util.Locale.ROOT) + " " + address
             + "，" + referenceLabel(profile, accounts) + "，点按编辑");
-        ui.touch(row, SURFACE, 10, LINE, () -> host.edit(profile));
+        ui.touch(row, SURFACE, 16, LINE, () -> host.edit(profile));
         return row;
+    }
+
+    private TextView action(MobileUi ui, String label, int color, Runnable action) {
+        TextView button = ui.text(label, 11.5f, color, false);
+        button.setGravity(Gravity.CENTER); button.setPadding(ui.dp(8), 0, ui.dp(8), 0); button.setMinHeight(ui.dp(28));
+        ui.touch(button, android.graphics.Color.TRANSPARENT, 8, 0, action);
+        return button;
     }
 
     static String referenceLabel(ProxyProfile profile, AccountStore accounts) {

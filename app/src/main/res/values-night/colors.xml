@@ -1,24 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 暗房：默认主题。暖中性底色，与文字、强调色同一色温；强调色只用于生成。 -->
-    <color name="muse_bg">#FF0C0B0A</color>
-    <color name="muse_surface">#FF161513</color>
-    <color name="muse_raised">#FF201E1B</color>
-    <color name="muse_line">#12F2EEE6</color>
-    <color name="muse_line_strong">#29F2EEE6</color>
-    <color name="muse_text">#FFF2EEE6</color>
-    <color name="muse_text2">#FFA39E95</color>
-    <color name="muse_muted">#FF7A756C</color>
+    <color name="muse_bg">#FF0E0E10</color>
+    <color name="muse_surface">#FF161619</color>
+    <color name="muse_raised">#FF222227</color>
+    <color name="muse_active_card">#FF26262C</color>
+    <color name="muse_line">#FF27272D</color>
+    <color name="muse_line_strong">#FF3A3A44</color>
+    <color name="muse_text">#FFF4F4F6</color>
+    <color name="muse_text2">#FFA1A1AA</color>
+    <color name="muse_muted">#FF6E6E77</color>
     <color name="muse_accent">#FFFF5A36</color>
-    <color name="muse_on_accent">#FF1A0702</color>
+    <color name="muse_on_accent">#FFFFFFFF</color>
     <color name="muse_accent_soft">#24FF5A36</color>
     <color name="muse_scrim">#9E000000</color>
     <color name="muse_progress">#FFA9D2B4</color>
     <color name="muse_chrome">@color/muse_bg</color>
     <!-- 额度色阶：已用 0 / 45 / 65 / 82 / 95%，之间连续插值。 -->
-    <color name="muse_quota_0">#FF46C98B</color>
-    <color name="muse_quota_1">#FFA3CC4E</color>
-    <color name="muse_quota_2">#FFE8B83E</color>
-    <color name="muse_quota_3">#FFFF8A3D</color>
-    <color name="muse_quota_4">#FFFF4B3A</color>
+    <color name="muse_quota_0">#FF34C759</color>
+    <color name="muse_quota_1">#FF84CC16</color>
+    <color name="muse_quota_2">#FFF59E0B</color>
+    <color name="muse_quota_3">#FFF97316</color>
+    <color name="muse_quota_4">#FFEF4444</color>
 </resources>

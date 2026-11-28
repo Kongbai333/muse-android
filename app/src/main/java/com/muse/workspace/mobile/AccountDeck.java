@@ -1,46 +1,29 @@
 package com.muse.workspace.mobile;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.RectF;
-import android.graphics.drawable.GradientDrawable;
-import android.os.Build;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
-import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import androidx.core.graphics.ColorUtils;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.function.Predicate;
-
 import static com.muse.workspace.mobile.MobileUi.*;
 
-/**
- * 账号叠放：当前账号在顶部，其余额度用完或不可用的沉底。叠放只覆盖卡片底部留白。
- * 点条切换（被点的卡抬起、飞到顶部展开，旧的当前卡收成条插回队列）；点当前卡打开网页；长按刷新额度或编辑。
- * 卡片视图按账号复用，重新绑定时只移动位置，所以侧栏任何一次刷新都会走同一套动画。
- */
+/** Current account details, compact account rows and an initially collapsed spent group. */
 final class AccountDeck extends FrameLayout {
     interface Host {
-        /** 切到该账号但停留在侧栏；返回 false 表示没切成（例如正在生成）。 */
         boolean switchAccount(AccountStore.Account account);
         void openAccount(AccountStore.Account account);
         void refreshAccount(AccountStore.Account account);
@@ -48,648 +31,318 @@ final class AccountDeck extends FrameLayout {
         void deleteAccount(AccountStore.Account account);
         void notice(String text);
     }
-
-    private static final String SPREAD_KEY = "account-deck-spread";
-    private static final int STRIP = 38, OUT = 30, TAIL = 8, GAP = 10, LABEL = 26, OUT_GAP = 12, SPREAD_GAP = 6;
-    private static final int MOTION = 440;
-    private static final PathInterpolator EASE = new PathInterpolator(0.2f, 0.8f, 0.2f, 1f);
-
+    private static final String GRID_KEY = "account-deck-grid";
     private final MobileUi ui;
     private final Host host;
     private final ProxyStore proxies;
     private final HashMap<String, Card> cards = new HashMap<>();
     private final ArrayList<Card> order = new ArrayList<>();
-    private final HashMap<View, ObjectAnimator> motions = new HashMap<>();
-    private final HashMap<View, Float> targets = new HashMap<>();
     private final LinearLayout liveLabel;
-    private final TextView liveText, outLabel, spreadToggle;
+    private final TextView liveText, spreadToggle, outLabel;
     private QuotaSync quotas;
-    private androidx.appcompat.app.AlertDialog actionMenu, quotaDialog;
-    private String menuId = "";
     private Predicate<AccountStore.Account> usable = account -> true;
-    private String currentId = "", flying = "";
-    private boolean spread, animateNext, staggerNext, laidOut;
-    private float liveY, outY;
+    private String currentId = "", menuId = "";
+    private boolean grid, outExpanded, menuWasOpen, detailsWereOpen;
+    private int liveY, outY;
+    private androidx.appcompat.app.AlertDialog actionMenu, quotaDialog;
 
     AccountDeck(Context context, MobileUi ui, Host host, ProxyStore proxies) {
         super(context);
-        this.ui = ui;
-        this.host = host;
-        this.proxies = proxies;
-        setClipChildren(false);
-        setClipToPadding(false);
-        spread = context.getSharedPreferences(MobileUi.PREFS, Context.MODE_PRIVATE).getBoolean(SPREAD_KEY, false);
-
+        this.ui = ui; this.host = host; this.proxies = proxies;
+        grid = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(GRID_KEY, false);
         liveLabel = ui.row();
+        liveLabel.setPadding(ui.dp(4), 0, 0, 0);
         liveText = ui.meta("", 10, MUTED);
-        liveLabel.setPadding(ui.dp(2), 0, 0, ui.dp(4));
         liveLabel.addView(liveText, new LinearLayout.LayoutParams(0, -2, 1));
-        spreadToggle = ui.text("", 12, TEXT2, true);
+        spreadToggle = ui.meta("", 10, TEXT2);
         spreadToggle.setGravity(Gravity.CENTER);
-        spreadToggle.setPadding(ui.dp(8), 0, ui.dp(8), 0);
-        ui.touch(spreadToggle, Color.TRANSPARENT, R_SM, 0, this::toggleSpread);
-        liveLabel.addView(spreadToggle, new LinearLayout.LayoutParams(-2, ui.dp(LABEL - 4)));
-        addView(liveLabel, new FrameLayout.LayoutParams(-1, ui.dp(LABEL)));
-
+        spreadToggle.setPadding(ui.dp(6), 0, ui.dp(6), 0);
+        ui.touch(spreadToggle, Color.TRANSPARENT, R_SM, 0, this::toggleGrid);
+        liveLabel.addView(spreadToggle, new LinearLayout.LayoutParams(-2, -1));
+        addView(liveLabel);
         outLabel = ui.single(ui.meta("", 10, MUTED));
-        outLabel.setPadding(ui.dp(2), 0, 0, 0);
         outLabel.setGravity(Gravity.CENTER_VERTICAL);
-        addView(outLabel, new FrameLayout.LayoutParams(-1, ui.dp(LABEL - 4)));
+        outLabel.setPadding(ui.dp(6), 0, ui.dp(6), 0);
+        ui.touch(outLabel, Color.TRANSPARENT, 8, 0, () -> { outExpanded = !outExpanded; resort(); requestLayout(); });
+        addView(outLabel);
     }
 
     void bind(List<AccountStore.Account> accounts, AccountStore.Account current,
-                 Predicate<AccountStore.Account> usable, QuotaSync quotas) {
-        this.usable = usable;
-        this.quotas = quotas;
+              Predicate<AccountStore.Account> usable, QuotaSync quotas) {
+        this.usable = usable; this.quotas = quotas;
         currentId = current == null ? "" : current.id;
         HashSet<String> alive = new HashSet<>();
         int index = 0;
         for (AccountStore.Account account : accounts) {
             alive.add(account.id);
             Card card = cards.get(account.id);
-            if (card == null) {
-                card = new Card(getContext(), account.id);
-                cards.put(account.id, card);
-                addView(card, new FrameLayout.LayoutParams(-1, -2));
-            }
-            card.account = account;
-            card.listIndex = index++;
+            if (card == null) { card = new Card(account.id); cards.put(account.id, card); addView(card); }
+            card.account = account; card.listIndex = index++; card.bind();
         }
-        for (Iterator<Map.Entry<String, Card>> it = cards.entrySet().iterator(); it.hasNext(); ) {
-            Map.Entry<String, Card> entry = it.next();
-            if (alive.contains(entry.getKey())) continue;
-            Card gone = entry.getValue();
-            ObjectAnimator motion = motions.remove(gone);
-            if (motion != null) motion.cancel();
-            targets.remove(gone);
-            removeView(gone);
-            it.remove();
-        }
-        for (Card card : cards.values()) refresh(card);
-        resort();
-        animateNext = laidOut;
-        requestLayout();
+        for (String id : new ArrayList<>(cards.keySet())) if (!alive.contains(id)) removeView(cards.remove(id));
+        resort(); requestLayout();
     }
 
     void updateQuota(String id) {
         Card card = cards.get(id);
-        if (card == null || card.account == null) return;
-        refresh(card);
-        resort();
-        animateNext = laidOut;
-        requestLayout();
+        if (card == null || quotas == null) return;
+        card.bind(); resort(); requestLayout();
     }
-
     void updateAvatar(String id, Bitmap image) {
         Card card = cards.get(id);
-        if (card != null) card.ring.setPhoto(image);
+        if (card != null && card.ring != null) card.ring.setPhoto(image);
     }
-
     record Anchor(String id, int slot, int offset) { }
-
     Anchor anchor(int position) {
-        if (order.isEmpty()) return new Anchor("", 0, 0);
-        Card first = order.get(0);
+        Card first = null;
         for (Card card : order) {
+            if (card.getVisibility() == GONE) continue;
+            if (first == null) first = card;
             if (card.targetY > position) break;
-            first = card;
+            if (card.targetY != first.targetY) first = card;
         }
-        return new Anchor(first.id, first.slot, position - (int) first.targetY);
+        return first == null ? new Anchor("", 0, 0) : new Anchor(first.id, order.indexOf(first), position - first.targetY);
     }
-
     int position(Anchor anchor) {
         if (order.isEmpty()) return 0;
         Card card = cards.get(anchor.id());
         if (card == null) card = order.get(Math.max(0, Math.min(order.size() - 1, anchor.slot())));
-        int span = card.slot + 1 < order.size() ? (int) (order.get(card.slot + 1).targetY - card.targetY) : card.getMeasuredHeight();
-        return (int) card.targetY + Math.min(anchor.offset(), Math.max(0, span - 1));
+        if (card.getVisibility() == GONE) return outY;
+        return card.targetY + Math.min(anchor.offset(), Math.max(0, card.getMeasuredHeight() - 1));
     }
-
     String currentId() { return currentId; }
-
+    void settlePositions() { }
     void restoreDetailsFrom(AccountDeck previous) {
+        outExpanded = previous.outExpanded; resort(); requestLayout();
         Card card = cards.get(previous.menuId);
-        if (previous.quotaDialog != null && previous.quotaDialog.isShowing()) {
-            previous.quotaDialog.dismiss();
-            if (card != null) showQuota(card);
-        } else if (previous.actionMenu != null && previous.actionMenu.isShowing()) {
-            previous.actionMenu.dismiss();
-            if (card != null) menu(card);
-        }
+        if (card == null) return;
+        if (previous.detailsWereOpen || previous.quotaDialog != null && previous.quotaDialog.isShowing()) showQuota(card);
+        else if (previous.menuWasOpen || previous.actionMenu != null && previous.actionMenu.isShowing()) menu(card);
     }
-
-    // ---------------------------------------------------------------- 数据
-
-    private void refresh(Card card) {
-        AccountStore.Account account = card.account;
-        long now = System.currentTimeMillis();
-        AccountCardState saved = quotas.card(account.id);
-        card.bind(account, account.id.equals(currentId), usable.test(account), saved, quotas.state(account.id), now);
+    private void toggleGrid() {
+        grid = !grid;
+        getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(GRID_KEY, grid).apply();
+        for (Card card : cards.values()) card.bind();
+        resort(); requestLayout(); // Sidebar restores an account anchor, never the old pixel position.
     }
-
-    /** 当前账号在最前；可切换的按已用额度从低到高（待同步排在后面）；用完与不可用的沉底。 */
     private void resort() {
         Card active = cards.get(currentId);
-        ArrayList<Card> live = new ArrayList<>(), out = new ArrayList<>();
-        for (Card card : cards.values()) {
-            if (card == active) continue;
-            if (card.sunk()) out.add(card); else live.add(card);
-        }
+        ArrayList<Card> live = new ArrayList<>(), spent = new ArrayList<>();
+        for (Card card : cards.values()) if (card != active) (card.sunk() ? spent : live).add(card);
         live.sort((a, b) -> {
-            if (a.known != b.known) return a.known ? -1 : 1;
-            int byUse = Double.compare(a.rankValue(), b.rankValue());
-            return byUse != 0 ? byUse : Integer.compare(a.listIndex, b.listIndex);
+            if ((a.quota != null) != (b.quota != null)) return a.quota != null ? -1 : 1;
+            int byUse = Double.compare(a.quota == null || a.quota.used() == null ? 0 : a.quota.used(),
+                b.quota == null || b.quota.used() == null ? 0 : b.quota.used());
+            return byUse == 0 ? Integer.compare(a.listIndex, b.listIndex) : byUse;
         });
-        out.sort((a, b) -> Integer.compare(a.listIndex, b.listIndex));
+        spent.sort((a, b) -> Integer.compare(a.listIndex, b.listIndex));
         order.clear();
         if (active != null) order.add(active);
-        order.addAll(live);
-        order.addAll(out);
-        for (int slot = 0; slot < order.size(); slot++) {
-            Card card = order.get(slot);
-            card.lastSlot = card.slot < 0 ? slot : card.slot;
-            card.slot = slot;
-        }
-        applyDepth();
-
-        boolean labels = order.size() > 1;
-        liveLabel.setVisibility(labels && !live.isEmpty() ? VISIBLE : GONE);
+        order.addAll(live); order.addAll(spent);
+        for (Card card : order) card.setVisibility(card != active && card.sunk() && !outExpanded ? GONE : VISIBLE);
+        liveLabel.setVisibility(live.isEmpty() ? GONE : VISIBLE);
         liveText.setText("可切换 " + live.size());
-        spreadToggle.setText(spread ? "叠放" : "展开");
-        spreadToggle.setContentDescription(spread ? "叠放账号列表" : "展开账号列表，显示每个账号的额度刻度");
-        boolean allSpent = true;
-        for (Card card : out) if (!card.exhausted) allSpent = false;
-        outLabel.setVisibility(labels && !out.isEmpty() ? VISIBLE : GONE);
-        outLabel.setText((allSpent ? "已用完 " : "暂不可用 ") + out.size());
+        spreadToggle.setText(grid ? "切单列" : "切双列");
+        spreadToggle.setContentDescription(spreadToggle.getText());
+        outLabel.setVisibility(spent.isEmpty() ? GONE : VISIBLE);
+        outLabel.setText("已用完 / 不可用 " + spent.size() + (outExpanded ? "    收起 ⌃" : "    展开 ⌄"));
+        outLabel.setContentDescription(outLabel.getText());
     }
-
-    /** 后面的卡压住前面卡的下沿；正在飞的卡临时抬到最上层。 */
-    private void applyDepth() {
-        float step = ui.dp(1) * 0.02f;
-        for (Card card : order) card.setTranslationZ(card.id.equals(flying) ? ui.dp(8) : card.slot * step);
-    }
-
-    // ---------------------------------------------------------------- 布局与动画
-
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
-        int width = MeasureSpec.getSize(widthSpec);
-        int exact = MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY);
+        int width = MeasureSpec.getSize(widthSpec), gap = ui.dp(6), y = 0, column = 0, rowHeight = 0;
         int free = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
-        for (int index = 0; index < getChildCount(); index++) {
-            View child = getChildAt(index);
-            if (child == liveLabel || child == outLabel) {
-                child.measure(exact, MeasureSpec.makeMeasureSpec(child.getLayoutParams().height, MeasureSpec.EXACTLY));
-            } else if (child.getVisibility() != GONE) child.measure(exact, free);
-        }
-        setMeasuredDimension(width, plan());
-    }
-
-    /** 算出每张卡和两行标签的目标位置，返回整叠的高度。 */
-    private int plan() {
-        int y = 0;
-        int index = 0;
-        Card active = order.isEmpty() || !order.get(0).id.equals(currentId) ? null : order.get(0);
-        if (active != null) {
-            active.targetY = 0;
-            y = active.getMeasuredHeight();
-            index = 1;
-        }
-        ArrayList<Card> live = new ArrayList<>(), out = new ArrayList<>();
-        for (; index < order.size(); index++) (order.get(index).sunk() ? out : live).add(order.get(index));
-        if (!live.isEmpty()) {
-            if (active != null) y += ui.dp(GAP);
-            liveY = y;
-            y += ui.dp(LABEL);
-            y = placeGroup(live, y);
-        }
-        if (!out.isEmpty()) {
-            if (y > 0) y += ui.dp(OUT_GAP);
-            outY = y;
-            y += ui.dp(LABEL - 4);
-            y = placeGroup(out, y);
-        }
-        return y;
-    }
-
-    private int placeGroup(List<Card> group, int top) {
-        for (int index = 0; index < group.size(); index++) {
-            Card card = group.get(index);
-            card.targetY = top;
-            top += card.getMeasuredHeight();
-            if (index + 1 < group.size()) top += spread ? ui.dp(SPREAD_GAP) : -ui.dp(TAIL / 2);
-        }
-        return top;
-    }
-
-    @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        int width = right - left;
-        for (int index = 0; index < getChildCount(); index++) {
-            View child = getChildAt(index);
-            if (child.getVisibility() != GONE) child.layout(0, 0, width, child.getMeasuredHeight());
-        }
-        boolean animate = animateNext && laidOut && ValueAnimator.areAnimatorsEnabled() && isShown();
-        boolean stagger = staggerNext;
-        animateNext = false;
-        staggerNext = false;
-        place(liveLabel, liveY, animate, 0);
-        place(outLabel, outY, animate, 0);
+        liveLabel.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(ui.rowHeight(24), MeasureSpec.EXACTLY));
+        outLabel.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(ui.rowHeight(30), MeasureSpec.EXACTLY));
+        boolean liveStarted = false, outStarted = false;
         for (Card card : order) {
-            int delay = stagger ? card.slot * 18 : card.id.equals(flying) ? 0
-                : Math.min(Math.abs(card.slot - card.lastSlot), 6) * 14 + 20;
-            place(card, card.targetY, animate, delay);
-            card.lastSlot = card.slot;
-        }
-        laidOut = true;
-    }
-
-    private void place(View view, float target, boolean animate, int delay) {
-        Float last = targets.get(view);
-        ObjectAnimator running = motions.get(view);
-        // 文字变化等引起的普通重排：正在去同一个位置的动画继续走完。
-        if (last != null && last == target && running != null && running.isStarted()) return;
-        if (running != null) running.cancel();
-        motions.remove(view);
-        targets.put(view, target);
-        if (!animate || last == null || Math.abs(view.getTranslationY() - target) < 1f) {
-            view.setTranslationY(target);
-            return;
-        }
-        ObjectAnimator motion = ObjectAnimator.ofFloat(view, View.TRANSLATION_Y, target);
-        motion.setDuration(MOTION);
-        motion.setStartDelay(delay);
-        motion.setInterpolator(EASE);
-        motion.addListener(new AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(Animator animation) {
-                if (motions.get(view) == animation) motions.remove(view);
+            if (card.active) {
+                card.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), free);
+                card.targetX = card.targetY = 0; y = card.getMeasuredHeight(); continue;
             }
-        });
-        motions.put(view, motion);
-        motion.start();
+            if (card.sunk() && !outStarted) {
+                if (column != 0) { y += rowHeight + gap; column = 0; }
+                outY = y + ui.dp(10); y = outY + outLabel.getMeasuredHeight(); outStarted = true;
+            } else if (!card.sunk() && !liveStarted) {
+                liveY = y + ui.dp(10); y = liveY + liveLabel.getMeasuredHeight(); liveStarted = true;
+            }
+            if (card.getVisibility() == GONE) { card.targetY = outY; continue; }
+            boolean tiled = grid && !card.sunk();
+            int cellWidth = tiled ? (width - gap) / 2 : width;
+            int height = ui.rowHeight(card.sunk() ? 34 : tiled ? 46 : 42);
+            card.measure(MeasureSpec.makeMeasureSpec(cellWidth, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
+            card.targetX = tiled ? column * (cellWidth + gap) : 0; card.targetY = y; rowHeight = height;
+            if (tiled && column == 0) column = 1;
+            else { y += height + (tiled ? gap : ui.dp(2)); column = 0; }
+        }
+        if (column != 0) y += rowHeight;
+        setMeasuredDimension(width, y);
     }
-
-    void settlePositions() {
-        for (ObjectAnimator motion : new ArrayList<>(motions.values())) motion.end();
+    @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        liveLabel.layout(0, liveY, r - l, liveY + liveLabel.getMeasuredHeight());
+        outLabel.layout(0, outY, r - l, outY + outLabel.getMeasuredHeight());
+        for (Card card : order) if (card.getVisibility() != GONE)
+            card.layout(card.targetX, card.targetY, card.targetX + card.getMeasuredWidth(), card.targetY + card.getMeasuredHeight());
     }
-
-    @Override protected void onDetachedFromWindow() {
-        for (ObjectAnimator motion : new ArrayList<>(motions.values())) motion.cancel();
-        motions.clear();
-        super.onDetachedFromWindow();
-    }
-
-    private void toggleSpread() {
-        spread = !spread;
-        getContext().getSharedPreferences(MobileUi.PREFS, Context.MODE_PRIVATE).edit().putBoolean(SPREAD_KEY, spread).apply();
-        for (Card card : cards.values()) refresh(card);
-        resort();
-        animateNext = laidOut;
-        staggerNext = true;
-        requestLayout();
-    }
-
-    // ---------------------------------------------------------------- 交互
-
     private void tap(Card card) {
-        AccountStore.Account account = card.account;
-        if (account == null) return;
-        if (card.id.equals(currentId)) { host.openAccount(account); return; }
-        if (!card.usable) {
-            shake(card);
-            host.notice("「" + account.name + "」需要更新 Android System WebView 后才能使用。");
-            return;
-        }
-        AccountQuota latest = quotas.value(card.id);
-        if (latest != null && latest.currentWeek(System.currentTimeMillis()) && latest.used() != null && latest.used() >= 100) {
-            shake(card);
-            host.notice("「" + account.name + "」本周额度已用完" + (card.resetText.isEmpty() ? "" : " · " + card.resetText));
-            return;
-        }
-        flying = card.id;
-        applyDepth();
-        boolean motion = ValueAnimator.areAnimatorsEnabled();
-        if (motion) card.animate().scaleX(1.035f).scaleY(1.035f).setDuration(130).setInterpolator(EASE)
-            .withEndAction(() -> card.animate().scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(EASE).start()).start();
-        if (!host.switchAccount(account)) {
-            flying = "";
-            card.animate().cancel();
-            card.setScaleX(1f);
-            card.setScaleY(1f);
-            applyDepth();
-            return;
-        }
-        performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-            ? HapticFeedbackConstants.CONFIRM : HapticFeedbackConstants.VIRTUAL_KEY);
-        postDelayed(() -> {
-            flying = "";
-            applyDepth();
-        }, MOTION + 160);
+        if (card.active) { host.openAccount(card.account); return; }
+        if (card.sunk()) {
+            card.shake();
+            host.notice("「" + card.account.name + "」" + (!card.usable ? "需要更新 Android System WebView 后才能使用。" : "本周额度已用完"));
+        } else host.switchAccount(card.account);
     }
-
     private void menu(Card card) {
-        AccountStore.Account account = card.account;
-        if (account == null) return;
+        if (actionMenu != null) actionMenu.dismiss();
         card.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-        android.text.SpannableString delete = new android.text.SpannableString("删除账号");
-        delete.setSpan(new android.text.style.ForegroundColorSpan(ACCENT), 0, delete.length(), 0);
-        CharSequence[] actions = card.usable ? new CharSequence[]{"刷新额度", "编辑账号", "额度明细", delete}
-            : new CharSequence[]{"额度明细", delete};
-        menuId = account.id;
-        actionMenu = MobileUi.dialog(getContext()).setTitle(account.name).setItems(actions, (dialog, which) -> {
-            if (cards.get(account.id) != card) return;
+        menuId = card.id;
+        CharSequence[] actions = card.usable ? new CharSequence[]{"刷新额度", "编辑账号", "额度明细", "删除账号"} : new CharSequence[]{"额度明细", "删除账号"};
+        actionMenu = MobileUi.dialog(getContext()).setTitle(card.account.name).setItems(actions, (dialog, which) -> {
+            if (cards.get(card.id) != card) return;
             switch (actions[which].toString()) {
-                case "刷新额度" -> host.refreshAccount(account);
-                case "编辑账号" -> host.editAccount(account);
+                case "刷新额度" -> host.refreshAccount(card.account);
+                case "编辑账号" -> host.editAccount(card.account);
                 case "额度明细" -> showQuota(card);
-                case "删除账号" -> host.deleteAccount(account);
+                case "删除账号" -> host.deleteAccount(card.account);
             }
         }).show();
         actionMenu.setOnDismissListener(ignored -> actionMenu = null);
     }
-
     private void showQuota(Card card) {
         menuId = card.id;
         AccountCardState saved = quotas.card(card.id);
         long now = System.currentTimeMillis();
         AccountQuota data = saved.quota(now);
-        String state = quotas.state(card.id);
         String reset = data == null ? "" : data.resetLabel(now);
-        String message = "周额度：" + (data == null ? "待获取" : data.weekly(now)) + AccountCardLabels.time(saved.observed("usage"))
-            + (reset.isEmpty() ? "" : "\n" + reset) + "\n同步状态："
-            + (data != null && !data.currentWeek(now) && "额度已同步".equals(state) ? "显示上次成功数据" : state)
-            + "\n\n" + AccountCardLabels.extraDetails(saved);
-        quotaDialog = MobileUi.dialog(getContext()).setTitle(card.account.name + " · 额度明细").setMessage(message)
-            .setPositiveButton("关闭", null).show();
+        String detail = "周额度：" + (data == null ? "待获取" : data.weekly(now)) + AccountCardLabels.time(saved.observed("usage"))
+            + (reset.isEmpty() ? "" : "\n" + reset) + "\n同步状态：" + quotas.state(card.id)
+            + "\n\n" + AccountCardLabels.extraDetails(saved) + "\n\n" + AccountCardLabels.inviteDetails(saved);
+        quotaDialog = MobileUi.dialog(getContext()).setTitle(card.account.name + " · 额度明细").setMessage(detail).setPositiveButton("关闭", null).show();
         quotaDialog.setOnDismissListener(ignored -> quotaDialog = null);
     }
-
-    private void shake(Card card) {
-        if (!ValueAnimator.areAnimatorsEnabled()) return;
-        float d = ui.dp(1);
-        ObjectAnimator shake = ObjectAnimator.ofFloat(card, View.TRANSLATION_X, 0, -5 * d, 4 * d, -3 * d, 2 * d, 0);
-        shake.setDuration(360);
-        shake.start();
+    @Override protected void onDetachedFromWindow() {
+        menuWasOpen = actionMenu != null && actionMenu.isShowing(); detailsWereOpen = quotaDialog != null && quotaDialog.isShowing();
+        if (actionMenu != null) actionMenu.dismiss();
+        if (quotaDialog != null) quotaDialog.dismiss();
+        super.onDetachedFromWindow();
     }
-
-    // ---------------------------------------------------------------- 卡片
 
     private final class Card extends LinearLayout {
         final String id;
-        final LinearLayout face, head, body, words, nameLine;
-        final Ring ring;
-        final TextView name, tag, network, percent, reset, invite, inviteCount, extra;
-        final View ticks;
         AccountStore.Account account;
-        int listIndex, slot = -1, lastSlot = -1;
-        float targetY;
-        boolean active, usable, known, unlimited, exhausted;
-        Double used;
-        String resetText = "", mode = "", prefix = "";
-
-        Card(Context context, String id) {
-            super(context);
-            this.id = id;
-            setOrientation(VERTICAL);
-            face = ui.column();
-            face.setElevation(ui.dp(1.5f));
-            face.setFocusable(true);
-            face.setOnClickListener(view -> tap(this));
-            face.setOnLongClickListener(view -> { menu(this); return true; });
-            addView(face, new LinearLayout.LayoutParams(-1, -2));
-
-            head = ui.row();
-            ring = new Ring(getContext());
-            head.addView(ring, new LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)));
-            words = ui.column();
-            words.setPadding(ui.dp(9), 0, ui.dp(6), 0);
-            nameLine = ui.row();
-            name = ui.single(ui.text("", 13, INK, true));
-            nameLine.addView(name, new LinearLayout.LayoutParams(-2, -2, 0f));
-            tag = ui.tag("");
-            LinearLayout.LayoutParams tagPosition = new LinearLayout.LayoutParams(-2, -2);
-            tagPosition.setMarginStart(ui.dp(6));
-            nameLine.addView(tag, tagPosition);
-            words.addView(nameLine, new LinearLayout.LayoutParams(-1, -2));
-            network = ui.single(ui.meta("", 9.5f, MUTED));
-            LinearLayout.LayoutParams networkPosition = new LinearLayout.LayoutParams(-1, -2);
-            networkPosition.topMargin = ui.dp(5);
-            words.addView(network, networkPosition);
-            head.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
-            percent = ui.single(ui.metaStrong("", 12.5f, INK));
-            percent.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            percent.setMaxWidth(ui.dp(84));
-            head.addView(percent, new LinearLayout.LayoutParams(-2, -2));
-            face.addView(head, new LinearLayout.LayoutParams(-1, ui.dp(STRIP)));
-
-            body = ui.column();
-            ticks = ui.tickBar();
-            body.addView(ticks, new LinearLayout.LayoutParams(-1, ui.dp(7)));
-            reset = ui.single(ui.meta("", 9.5f, MUTED));
-            ui.block(body, reset, 6);
-            ui.block(face, body, 2);
-
-            LinearLayout inviteRow = ui.row();
-            inviteRow.addView(ui.text("邀请码", 12, TEXT2, false), new LinearLayout.LayoutParams(-2, -2));
-            invite = ui.metaStrong("", 12.5f, INK);
-            invite.setGravity(Gravity.CENTER_VERTICAL);
-            invite.setMinHeight(ui.dp(32));
-            ui.touch(invite, Color.TRANSPARENT, R_SM, 0, () -> {
-                if (cards.get(id) != this) return;
-                String code = quotas.card(id).inviteCode();
-                if (!code.isEmpty() && code.contentEquals(invite.getText())) QuotaCard.copyInviteCode(getContext(), code);
-            });
-            invite.setOnLongClickListener(view -> { menu(this); return true; });
-            LinearLayout.LayoutParams codePosition = new LinearLayout.LayoutParams(-2, -2);
-            codePosition.setMarginStart(ui.dp(6));
-            inviteRow.addView(invite, codePosition);
-            ui.block(face, inviteRow, 2);
-            inviteCount = ui.meta("", 12, TEXT2);
-            extra = ui.meta("", 12, TEXT2);
-            ui.block(face, inviteCount, 0);
-            ui.block(face, extra, 4);
+        AccountQuota quota;
+        AccountFace ring;
+        int listIndex, targetX, targetY;
+        boolean active, usable, exhausted;
+        ObjectAnimator motion;
+        Card(String id) {
+            super(AccountDeck.this.getContext()); this.id = id;
+            setOrientation(VERTICAL); setGravity(Gravity.CENTER_VERTICAL);
+            setOnClickListener(view -> tap(this)); setOnLongClickListener(view -> { menu(this); return true; });
         }
-
-        boolean sunk() { return exhausted || !usable; }
-
-        /** 排序用：不限量按 0 算。 */
-        double rankValue() { return !known || used == null ? 0 : used; }
-
-        void bind(AccountStore.Account account, boolean active, boolean usable, AccountCardState saved, String state, long now) {
-            AccountQuota data = saved.quota(now);
-            this.active = active;
-            this.usable = usable;
-            known = data != null;
-            used = known ? data.used() : null;
-            unlimited = known && used == null;
-            boolean current = known && data.currentWeek(now);
-            exhausted = current && used != null && used >= 100;
-            prefix = !known ? "" : data.resets() > data.observed() && data.resets() <= now ? "旧周期 "
-                : current && "额度已同步".equals(state) ? "" : "上次 ";
-
-            name.setText(account.name);
-            String plan = saved.plan();
-            tag.setText(plan.toUpperCase(Locale.ROOT));
-            ProxyProfile profile = proxies.find(account.proxyId());
-            network.setText(!usable ? "需更新 WebView" : profile != null
-                ? profile.scheme.toUpperCase(Locale.ROOT) + " · " + profile.name : account.networkLabel(proxies));
-            resetText = data == null ? "" : data.resetLabel(now);
-            String code = saved.inviteCode();
-            boolean available = !code.isEmpty();
-            invite.setText(available ? code : saved.inviteExhausted() ? "已满，暂无可用码" : "待获取");
-            invite.setEnabled(available);
-            invite.setFocusable(available);
-            invite.setTextColor(available ? INK : MUTED);
-            invite.setPaintFlags(available ? invite.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG : invite.getPaintFlags() & ~Paint.UNDERLINE_TEXT_FLAG);
-            invite.setContentDescription(available ? "邀请码 " + code + "，点按复制" : null);
-            inviteCount.setText("已邀请 " + AccountCardLabels.inviteCount(saved) + " 人");
-            extra.setText(AccountCardLabels.extraSummary(saved));
-            ring.setFace(account, active, sunk());
-
-            String next = active ? "active" : sunk() ? "out" : "strip";
-            boolean detailed = !sunk() && (active || spread);
-            next += detailed ? "+" : "";
-            if (!next.equals(mode)) applyMode(active, detailed);
-            if (!next.equals(mode) && detailed && !mode.isEmpty() && ValueAnimator.areAnimatorsEnabled()) {
-                body.setAlpha(0f);
-                body.animate().alpha(1f).setStartDelay(160).setDuration(260).start();
+        boolean sunk() { return !usable || exhausted; }
+        void bind() {
+            removeAllViews(); active = id.equals(currentId); usable = AccountDeck.this.usable.test(account);
+            AccountCardState saved = quotas.card(id);
+            long now = System.currentTimeMillis(); quota = saved.quota(now);
+            exhausted = quota != null && quota.currentWeek(now) && quota.used() != null && quota.used() >= 100;
+            boolean tiled = grid && !active && !sunk(), out = sunk() && !active;
+            setAlpha(out ? .65f : 1f); setMinimumHeight(active ? ui.rowHeight(124) : 0);
+            setPadding(ui.dp(active ? 10 : 8), ui.dp(active ? 10 : 0), ui.dp(active ? 10 : 8), ui.dp(active ? 10 : 0));
+            setBackground(ui.touchable(active ? ACTIVE_CARD : tiled ? RAISED : Color.TRANSPARENT, out ? 8 : 12, active ? LINE_STRONG : tiled ? LINE : 0));
+            setElevation(active ? ui.dp(1) : 0);
+            LinearLayout head = ui.row();
+            int faceSize = active ? 32 : out ? 18 : tiled ? 20 : 24;
+            ring = new AccountFace(getContext(), ui, account, faceSize, active, usable, quota, quotas.avatar(id));
+            head.addView(ring, new LayoutParams(ui.dp(faceSize), ui.dp(faceSize)));
+            LinearLayout words = ui.column();
+            words.setPadding(ui.dp(active ? 10 : tiled ? 6 : 8), 0, ui.dp(4), 0);
+            LinearLayout names = ui.nameRow();
+            TextView name = ui.single(ui.text(account.name, active ? 13.5f : tiled || out ? 12 : 12.5f, out ? MUTED : INK, !out));
+            names.addView(name, new LayoutParams(-2, -2));
+            if (!tiled && !out && !saved.plan().isEmpty()) {
+                TextView tag = ui.single(ui.meta(saved.plan().toUpperCase(Locale.ROOT), active ? 9.5f : 8.5f, active ? TEXT2 : MUTED));
+                tag.setPadding(ui.dp(active ? 6 : 4), ui.dp(1), ui.dp(active ? 6 : 4), ui.dp(1)); tag.setMaxWidth(ui.dp(52));
+                tag.setBackground(ui.shape(Color.TRANSPARENT, 4, LINE_STRONG));
+                LayoutParams p = new LayoutParams(-2, -2); p.setMarginStart(ui.dp(6)); names.addView(tag, p);
             }
-            mode = next;
-            tag.setVisibility(sunk() && !active || plan.isEmpty() ? GONE : VISIBLE);
-
-            if (!known) showFixed(!usable ? "不可用" : "额度已同步".equals(state) ? "待获取" : state);
-            else if (unlimited) showFixed(prefix + "不限");
-            else if (exhausted) showFixed(prefix + "用完");
-            else show(used.floatValue());
-
-            String describe = account.name + (plan.isEmpty() ? "" : "，" + plan) + "，"
-                + (!usable ? "需更新 WebView 后可用" : !known ? "额度" + percent.getText()
-                : unlimited ? "不限量" : exhausted ? "本周额度已用完" : "已用 " + Math.round(used) + "%，" + quotaLevel(used))
-                + (active ? "，当前账号，点按打开网页" : sunk() ? "" : "，点按切换") + (usable ? "，长按刷新或编辑" : "");
-            face.setContentDescription(describe + (prefix.isEmpty() ? "" : "，" + prefix.trim() + "记录")
-                + "，" + inviteCount.getText() + "，" + extra.getText() + (available ? "" : "，邀请码" + invite.getText()) + "，长按查看账号操作");
-        }
-
-        private void applyMode(boolean active, boolean detailed) {
-            boolean out = sunk() && !active;
-            int fill = active ? (NIGHT ? ColorUtils.blendARGB(RAISED, INK, 0.05f) : SURFACE)
-                : out ? ColorUtils.blendARGB(SURFACE, NIGHT ? RAISED : BG, 0.55f) : (NIGHT ? RAISED : BG);
-            face.setBackground(ui.touchable(fill, R_MD, active ? LINE_STRONG : LINE));
-            face.setPadding(ui.dp(11), 0, ui.dp(11), ui.dp(detailed ? 12 : TAIL));
-            int headHeight = active || (detailed && spread) ? 54 : out ? OUT : STRIP;
-            head.getLayoutParams().height = ui.dp(headHeight);
-            int ringSize = headHeight >= 54 ? 32 : out ? 18 : 24;
-            ring.getLayoutParams().width = ui.dp(ringSize);
-            ring.getLayoutParams().height = ui.dp(ringSize);
-            ring.setSize(ringSize);
-            name.setTextSize(out ? 12 : active ? 14 : 13);
-            name.setTextColor(out ? MUTED : INK);
-            name.setTypeface(android.graphics.Typeface.create(out ? "sans-serif" : "sans-serif-medium", android.graphics.Typeface.NORMAL));
-            name.setMaxWidth(ui.dp(active ? 150 : 130));
-            network.setVisibility(headHeight >= 54 ? VISIBLE : GONE);
-            percent.setTextSize(active ? 15 : out ? 10.5f : 12.5f);
-            body.setVisibility(detailed ? VISIBLE : GONE);
-            body.animate().cancel();
-            body.setAlpha(1f);
-            head.requestLayout();
-        }
-
-        /** 环、刻度条和百分比数字用同一个颜色，随数值连续变化。 */
-        private void show(float value) {
-            int tone = quotaColor((double) value);
-            percent.setText(prefix + Math.round(value) + "%");
-            percent.setTextColor(tone);
-            percent.setTextSize(active ? 15 : 12.5f);
-            ring.setProgress(value / 100f, tone);
-            MobileUi.setTicks(ticks, (double) value, true);
-            reset.setText(resetText.isEmpty() ? quotaLevel(value) : resetText + " · " + quotaLevel(value));
-        }
-
-        private void showFixed(String text) {
-            percent.setText(text);
-            percent.setTextColor(unlimited ? Q0 : MUTED);
-            percent.setTextSize(active && unlimited ? 15 : 10.5f);
-            ring.setProgress(unlimited ? 1f : exhausted ? 1f : 0f, unlimited ? Q0 : MUTED);
-            MobileUi.setTicks(ticks, exhausted ? 100d : null, known);
-            reset.setText(unlimited ? "不限量" : resetText.isEmpty() ? text : resetText);
-        }
-    }
-
-    /** 头像 + 外圈额度环：先画灰色轨道，再按已用比例画色弧，头像缩在环内。 */
-    private final class Ring extends FrameLayout {
-        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), arc = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF box = new RectF();
-        private final TextView initial;
-        private final ImageView photo;
-        private float progress, stroke;
-        private Bitmap image;
-
-        Ring(Context context) {
-            super(context);
-            setWillNotDraw(false);
-            track.setStyle(Paint.Style.STROKE);
-            arc.setStyle(Paint.Style.STROKE);
-            initial = ui.figure("", 10, INK);
-            initial.setGravity(Gravity.CENTER);
-            addView(initial, new FrameLayout.LayoutParams(-1, -1));
-            photo = new ImageView(context);
-            photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            GradientDrawable oval = new GradientDrawable();
-            oval.setShape(GradientDrawable.OVAL);
-            oval.setColor(RAISED);
-            photo.setBackground(oval);
-            photo.setClipToOutline(true);
-            photo.setVisibility(GONE);
-            addView(photo, new FrameLayout.LayoutParams(-1, -1));
-            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-            setSize(24);
-        }
-
-        void setSize(int sizeDp) {
-            stroke = ui.dp(sizeDp >= 30 ? 2.5f : 2f);
-            int inset = Math.round(stroke + ui.dp(sizeDp >= 24 ? 2f : 1.5f));
-            for (View child : new View[]{initial, photo}) {
-                FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) child.getLayoutParams();
-                params.setMargins(inset, inset, inset, inset);
-                child.setLayoutParams(params);
+            words.addView(names, new LayoutParams(-1, -2));
+            if (!tiled && !out) {
+                ProxyProfile route = proxies.find(account.proxyId());
+                String label = !usable ? "需更新 WebView" : route == null ? account.networkLabel(proxies) : route.scheme.toUpperCase(Locale.ROOT) + " · " + route.name;
+                String cached = AccountChoices.cachedLabel(quota, now);
+                if (!active && !cached.isEmpty()) label = cached + " · " + label;
+                ui.block(words, ui.single(ui.meta(label, active ? 9.5f : 9, MUTED)), 2);
             }
-            initial.setTextSize(Math.max(8f, sizeDp * 0.36f));
-            invalidate();
+            head.addView(words, new LayoutParams(0, -2, 1));
+            int tone = !usable || quota == null ? MUTED : quotaColor(quota.used() == null ? 0d : quota.used());
+            String percent = !usable ? "不可用" : quota == null ? "待同步" : quota.used() == null ? "不限" : exhausted ? "用完" : Math.round(quota.used()) + "%";
+            LinearLayout numbers = ui.column(); numbers.setGravity(Gravity.END);
+            numbers.addView(ui.single(ui.metaStrong(percent, active ? 15 : tiled ? 10.5f : out ? 10 : 11.5f, tone)));
+            String cached = AccountChoices.cachedLabel(quota, now);
+            if (tiled && !cached.isEmpty()) ui.block(numbers, ui.meta(cached, 8, MUTED), 1);
+            if (!active && !tiled && !out) {
+                LayoutParams p = new LayoutParams(ui.dp(36), ui.dp(2.5f)); p.topMargin = ui.dp(4);
+                numbers.addView(ui.miniProgress(quota == null ? null : quota.used(), quota != null), p);
+            }
+            head.addView(numbers, new LayoutParams(!active && !tiled && !out ? ui.dp(44) : -2, -2));
+            if (active || !tiled && !out) {
+                android.widget.ImageButton more = ui.compactIconButton(active ? R.drawable.ic_more : R.drawable.ic_more_vertical, "账号操作 · " + account.name, MUTED, () -> menu(this));
+                more.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER); more.setPadding(ui.dp(5), ui.dp(5), ui.dp(5), ui.dp(5));
+                LayoutParams p = new LayoutParams(ui.dp(24), ui.dp(28)); p.setMarginStart(ui.dp(4)); head.addView(more, p);
+            }
+            addView(head, new LayoutParams(-1, -2));
+            if (tiled) {
+                LayoutParams p = new LayoutParams(-1, ui.dp(2.5f)); p.topMargin = ui.dp(4);
+                addView(ui.miniProgress(quota == null ? null : quota.used(), quota != null), p);
+            }
+            if (active) details(saved, now);
+            setContentDescription(account.name + "，" + percent + "，" + (quota == null ? quotas.state(id) : quota.weekly(now))
+                + (active ? "，当前账号，点按打开网页" : sunk() ? "，不可切换" : "，点按切换") + "，长按查看账号操作");
         }
-
-        void setFace(AccountStore.Account account, boolean active, boolean out) {
-            String label = account.name == null || account.name.isEmpty() ? "M"
-                : account.name.substring(0, account.name.offsetByCodePoints(0, 1));
-            initial.setText(label.toUpperCase(Locale.ROOT));
-            GradientDrawable face = new GradientDrawable();
-            face.setShape(GradientDrawable.OVAL);
-            face.setColor(active ? INK : NIGHT ? SURFACE : RAISED);
-            initial.setBackground(face);
-            initial.setTextColor(active ? BG : out ? MUTED : INK);
-            if (image == null && quotas != null) setPhoto(quotas.avatar(account.id));
+        private void details(AccountCardState saved, long now) {
+            View ticks = ui.tickBar(); MobileUi.setTicks(ticks, quota == null ? null : quota.used(), quota != null);
+            LayoutParams tickPos = new LayoutParams(-1, ui.dp(6)); tickPos.topMargin = ui.dp(8); addView(ticks, tickPos);
+            LinearLayout info = ui.row();
+            String reset = quota == null ? "待同步" : quota.used() == null ? "不限量" : quota.resetLabel(now)
+                + (quota.resetLabel(now).isEmpty() ? "" : " · ") + quotaLevel(quota.used());
+            if (quota != null && !quota.currentWeek(now)) reset = "上次 · " + reset;
+            info.addView(ui.single(ui.meta(reset, 9.5f, MUTED)), new LayoutParams(0, -2, 1));
+            boolean remaining = saved.extraRemaining() != null && saved.extraRemaining() > 0;
+            TextView extra = ui.single(ui.metaStrong(AccountCardLabels.extra(saved), 9.5f, remaining ? INK : MUTED)); extra.setMaxWidth(ui.dp(134));
+            LayoutParams extraPos = new LayoutParams(-2, -2); extraPos.setMarginStart(ui.dp(8)); info.addView(extra, extraPos); ui.block(this, info, 6);
+            View rule = new View(getContext()); rule.setBackgroundColor(LINE);
+            LayoutParams rulePos = new LayoutParams(-1, ui.dp(1)); rulePos.topMargin = ui.dp(6); addView(rule, rulePos);
+            LinearLayout invitation = ui.row(); String code = saved.inviteCode();
+            TextView invite = ui.single(ui.meta("邀请码 " + (code.isEmpty() ? saved.inviteExhausted() ? "已满" : "待获取" : code), 9.5f, code.isEmpty() ? MUTED : TEXT2));
+            invite.setMinHeight(ui.dp(22)); invite.setGravity(Gravity.CENTER_VERTICAL);
+            if (!code.isEmpty()) {
+                ui.touch(invite, Color.TRANSPARENT, 4, 0, () -> {
+                    String latest = quotas.card(id).inviteCode(); if (latest.isEmpty()) return;
+                    ClipboardManager clipboard = getContext().getSystemService(ClipboardManager.class); if (clipboard == null) return;
+                    try { clipboard.setPrimaryClip(ClipData.newPlainText("Muse 邀请码", latest)); host.notice("已复制邀请码：" + latest); }
+                    catch (RuntimeException unavailable) { host.notice("无法复制邀请码"); }
+                });
+                invite.setContentDescription("邀请码 " + code + "，点按复制");
+            }
+            LinearLayout codeRow = ui.nameRow(); codeRow.addView(invite, new LayoutParams(-2, -2));
+            if (!code.isEmpty()) {
+                View copy = ui.iconView(R.drawable.ic_copy, MUTED, 10);
+                LayoutParams copyPosition = new LayoutParams(ui.dp(10), ui.dp(10)); copyPosition.setMarginStart(ui.dp(4));
+                codeRow.addView(copy, copyPosition); copy.setOnClickListener(view -> invite.performClick());
+                copy.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+            }
+            invitation.addView(codeRow, new LayoutParams(0, -2, 1));
+            TextView count = ui.single(ui.meta("邀请 " + AccountCardLabels.inviteCount(saved), 9.5f, TEXT2)); count.setMaxWidth(ui.dp(100));
+            LayoutParams countPos = new LayoutParams(-2, -2); countPos.setMarginStart(ui.dp(8)); invitation.addView(count, countPos); ui.block(this, invitation, 6);
+            setTooltipText((quota == null ? "待同步" : quota.weekly(now)) + AccountCardLabels.time(saved.observed("usage"))
+                + "\n" + AccountCardLabels.extraSummary(saved) + "\n" + AccountCardLabels.inviteDetails(saved));
         }
-
-        void setPhoto(Bitmap bitmap) {
-            image = bitmap;
-            photo.setImageBitmap(bitmap);
-            photo.setVisibility(bitmap == null ? GONE : VISIBLE);
-            initial.setVisibility(bitmap == null ? VISIBLE : GONE);
+        void shake() {
+            if (!ValueAnimator.areAnimatorsEnabled()) return;
+            if (motion != null) motion.cancel();
+            motion = ObjectAnimator.ofFloat(this, TRANSLATION_X, 0, -ui.dp(5), ui.dp(4), -ui.dp(3), ui.dp(2), 0); motion.setDuration(360); motion.start();
         }
-
-        void setProgress(float value, int color) {
-            progress = Math.max(0f, Math.min(1f, value));
-            arc.setColor(color);
-            invalidate();
-        }
-
-        @Override protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float half = stroke / 2f;
-            box.set(half, half, getWidth() - half, getHeight() - half);
-            track.setStrokeWidth(stroke);
-            track.setColor(LINE_STRONG);
-            canvas.drawOval(box, track);
-            if (progress <= 0f) return;
-            arc.setStrokeWidth(stroke);
-            canvas.drawArc(box, -90f, 360f * progress, false, arc);
+        @Override protected void onDetachedFromWindow() {
+            if (motion != null) motion.cancel(); setTranslationX(0); super.onDetachedFromWindow();
         }
     }
 }

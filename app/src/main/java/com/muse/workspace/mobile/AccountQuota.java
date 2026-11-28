@@ -33,7 +33,7 @@ record AccountQuota(String plan, Double used, long observed, long resets, String
 
     String resetLabel(long now) {
         if (resets <= 0) return "";
-        return (resets <= now ? "上次 " : "") + new SimpleDateFormat("M月d日重置", Locale.SIMPLIFIED_CHINESE).format(new Date(resets));
+        return (resets <= now ? "上次 " : "") + new SimpleDateFormat("EEE HH:mm 重置", Locale.SIMPLIFIED_CHINESE).format(new Date(resets));
     }
 
     String invitation(long now) {

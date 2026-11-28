@@ -84,7 +84,7 @@ final class StudioResults {
         for (int index = entries.size() - 1; index >= 0; index--) {
             Result result = new Result(entries.get(index), index < THUMBNAIL_LIMIT);
             if (index == 0) latest = result;
-            ui.block(cards, result.card, cards.getChildCount() == 0 ? 4 : 30);
+            ui.block(cards, result.card, cards.getChildCount() == 0 ? 0 : 12);
         }
     }
 
@@ -116,6 +116,7 @@ final class StudioResults {
     /** 按比例测量的画面框；竖图收窄，横图占满。 */
     static final class AspectFrame extends FrameLayout {
         float ratioWidth = 4, ratioHeight = 5;
+        int previewHeight = 160;
 
         AspectFrame(Activity context) { super(context); }
 
@@ -126,11 +127,8 @@ final class StudioResults {
         }
 
         @Override protected void onMeasure(int widthSpec, int heightSpec) {
-            int available = MeasureSpec.getSize(widthSpec);
-            float shape = ratioWidth / ratioHeight;
-            float fraction = shape < 0.6f ? 0.62f : shape < 0.8f ? 0.76f : shape < 1.01f ? 0.86f : 1f;
-            int width = Math.round(available * fraction);
-            int height = Math.round(width * ratioHeight / ratioWidth);
+            int width = MeasureSpec.getSize(widthSpec);
+            int height = Math.round(previewHeight * getResources().getDisplayMetrics().density);
             super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
         }
@@ -151,6 +149,7 @@ final class StudioResults {
         boolean wasRunning, initialized, developed, ticking;
         String stepText = "";
         ObjectAnimator pulse;
+        ValueAnimator development;
         // 显影计时：每秒刷新一次，离开屏幕即停。
         final Runnable tick = new Runnable() {
             @Override public void run() {
@@ -163,11 +162,20 @@ final class StudioResults {
             this.entry = entry;
             this.thumbnail = thumbnail;
             card = ui.column();
+            card.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(12));
+            card.setBackground(ui.shape(SURFACE, 16, LINE));
+            LinearLayout promptRow = ui.row(); promptRow.setGravity(Gravity.TOP);
+            StudioPromptView prompt = new StudioPromptView(activity, ui, entry.prompt, () -> showPrompt(entry));
+            promptRow.addView(prompt, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView stamp = ui.meta(new SimpleDateFormat("HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(entry.created)), 9.5f, MUTED);
+            LinearLayout.LayoutParams stampPosition = new LinearLayout.LayoutParams(-2, -2); stampPosition.setMarginStart(ui.dp(8));
+            promptRow.addView(stamp, stampPosition); card.addView(promptRow);
+            ui.block(card, prompt.hint(), 0);
 
             media = new AspectFrame(activity);
             float[] ratio = MobileUi.ratioValue(entry.ratio);
             media.setRatio(ratio[0], ratio[1]);
-            media.setBackground(ui.shape(NIGHT ? 0xFF050505 : RAISED, R_MD, 0));
+            media.setBackground(ui.shape(RAISED, R_MD, LINE_STRONG));
             media.setClipToOutline(true);
             image = new ImageView(activity);
             image.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -177,7 +185,7 @@ final class StudioResults {
             // 显影中：整块暗房底色，底部一团安全灯红光缓慢呼吸；中间等宽字「显影中」、步骤与计时；底边一条进度线。
             // 白昼主题也保持暗房，和结果出来后的“显影”动画接得上。
             overlay = new FrameLayout(activity);
-            overlay.setBackgroundColor(0xFF0A0908);
+            overlay.setBackgroundColor(RAISED);
             glow = new View(activity);
             android.graphics.drawable.GradientDrawable light = new android.graphics.drawable.GradientDrawable();
             light.setGradientType(android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT);
@@ -190,11 +198,9 @@ final class StudioResults {
 
             LinearLayout label = ui.column();
             label.setGravity(Gravity.CENTER_HORIZONTAL);
-            TextView title = ui.metaStrong("显影中", 11, ACCENT);
-            title.setLetterSpacing(0.32f);
-            title.setPadding(ui.dp(4), 0, 0, 0); // 字距留在末尾，补到左边保持居中
+            TextView title = ui.metaStrong("暗房显影中…", 12.5f, ACCENT);
             label.addView(title);
-            step = ui.single(ui.meta("", 10, 0x99F2EEE6));
+            step = ui.single(ui.meta("", 10, MUTED));
             step.setGravity(Gravity.CENTER);
             step.setMaxWidth(ui.dp(260));
             LinearLayout.LayoutParams stepPosition = new LinearLayout.LayoutParams(-2, -2);
@@ -205,7 +211,7 @@ final class StudioResults {
             LinearProgressIndicator progress = new LinearProgressIndicator(activity);
             progress.setIndeterminate(true);
             progress.setIndicatorColor(ACCENT);
-            progress.setTrackColor(0x14FFFFFF);
+            progress.setTrackColor(LINE);
             progress.setTrackThickness(ui.dp(2));
             progress.setTrackCornerRadius(0);
             overlay.addView(progress, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
@@ -222,6 +228,7 @@ final class StudioResults {
                 @Override public void onViewDetachedFromWindow(View view) {
                     media.removeCallbacks(tick);
                     stopPulse();
+                    if (development != null) development.cancel();
                 }
             });
 
@@ -234,32 +241,24 @@ final class StudioResults {
             stopped.setVisibility(View.GONE);
             media.addView(stopped, new FrameLayout.LayoutParams(-1, -1));
 
-            if (thumbnail) card.addView(media, new LinearLayout.LayoutParams(-1, -2));
-
-            StudioPromptView prompt = new StudioPromptView(activity, ui, entry.prompt, () -> showPrompt(entry));
-            ui.block(card, prompt, thumbnail ? 12 : 0);
-            ui.block(card, prompt.hint(), 0);
+            if (thumbnail) ui.block(card, media, 10);
             reply = ui.text("", 13, TEXT2, false);
             reply.setTextIsSelectable(true);
             ui.block(card, reply, 6);
 
             LinearLayout meta = ui.row();
-            String stamp = new SimpleDateFormat("M/d HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(entry.created));
+            String timestamp = new SimpleDateFormat("M/d HH:mm", Locale.SIMPLIFIED_CHINESE).format(new Date(entry.created));
             String aspect = "Auto".equals(entry.ratio) ? "自动画幅" : entry.ratio;
             // 底片边码：IMG / VID · 画幅 · 时长 · 账号；读屏仍读中文。
             String code = (entry.video ? "VID" : "IMG") + " · " + ("Auto".equals(entry.ratio) ? "AUTO" : entry.ratio)
                 + (entry.video ? " · " + entry.seconds + "S" : "") + " · " + entry.name;
             meta.setContentDescription((entry.video ? "视频" : "图片") + "，" + aspect + (entry.video ? "，" + entry.seconds + " 秒" : "")
-                + "，" + entry.name + "，" + stamp);
-            meta.addView(ui.single(ui.meta(code, 10.5f, MUTED)), new LinearLayout.LayoutParams(0, -2, 1));
-            TextView time = ui.meta(stamp, 10.5f, MUTED);
-            LinearLayout.LayoutParams timePosition = new LinearLayout.LayoutParams(-2, -2);
-            timePosition.setMarginStart(ui.dp(10));
-            meta.addView(time, timePosition);
+                + "，" + entry.name + "，" + timestamp);
+            meta.addView(ui.single(ui.meta(code, 9.5f, MUTED)), new LinearLayout.LayoutParams(0, -2, 1));
             ui.block(card, meta, 8);
 
             actions = ui.row();
-            ui.block(card, actions, 12);
+            meta.addView(actions, new LinearLayout.LayoutParams(-2, -2));
             refresh();
         }
 
@@ -267,6 +266,8 @@ final class StudioResults {
             if (!entry.text.contentEquals(reply.getText())) reply.setText(entry.text);
             reply.setVisibility(entry.text.isEmpty() ? View.GONE : View.VISIBLE);
             boolean running = studio.running() == entry;
+            int previewHeight = running ? 144 : 160;
+            if (media.previewHeight != previewHeight) { media.previewHeight = previewHeight; media.requestLayout(); }
             File file = studio.media(entry);
             String status = entry.status == null ? "" : entry.status;
             if (!status.equals(stepText)) { stepText = status; updateClock(); }
@@ -282,13 +283,12 @@ final class StudioResults {
             currentFile = file;
             actions.removeAllViews();
             if (running) {
-                addAction(ui.small("停止生成", R.drawable.ic_stop, false, studio::stop));
-                addAction(ui.small("提示词", 0, true, () -> showPrompt(entry)));
+                addAction(ui.small("停止", 0, false, studio::stop));
                 return;
             }
             // 动作只留两个常用的，其余收进「⋯」；点图片本身就是查看 / 播放。
-            if (file != null) addAction(ui.small("保存", R.drawable.ic_download, false, () -> save.accept(entry)));
-            addAction(ui.small("再编辑", R.drawable.ic_edit, true, () -> reuse.accept(entry)));
+            addAction(ui.small("复用", 0, true, () -> reuse.accept(entry)));
+            if (file != null) addAction(ui.small("保存", 0, false, () -> save.accept(entry)));
             if (file == null) addAction(ui.small("提示词", 0, true, () -> showPrompt(entry)));
             else {
                 View spacer = ui.spacer();
@@ -303,7 +303,8 @@ final class StudioResults {
                 more.setCompoundDrawablePadding(0);
                 more.setPadding(ui.dp(9), 0, ui.dp(9), 0);
                 more.setContentDescription("更多：" + (entry.video ? "播放视频" : "查看大图") + "、查看提示词");
-                actions.addView(more, new LinearLayout.LayoutParams(-2, ui.dp(34)));
+                more.setMinHeight(ui.dp(28)); more.setMinimumHeight(ui.dp(28));
+                actions.addView(more, new LinearLayout.LayoutParams(-2, ui.dp(28)));
             }
             if (file == null || !thumbnail) return;
             media.setOnClickListener(tap -> preview(entry, file));
@@ -369,7 +370,8 @@ final class StudioResults {
         }
 
         private void addAction(View button) {
-            LinearLayout.LayoutParams geometry = new LinearLayout.LayoutParams(-2, ui.dp(34));
+            if (button instanceof TextView label) { label.setTextSize(11.5f); label.setMinHeight(ui.dp(28)); label.setMinimumHeight(ui.dp(28)); label.setPadding(ui.dp(10), 0, ui.dp(10), 0); }
+            LinearLayout.LayoutParams geometry = new LinearLayout.LayoutParams(-2, ui.rowHeight(28));
             if (actions.getChildCount() != 0) geometry.setMarginStart(ui.dp(6));
             actions.addView(button, geometry);
         }
@@ -399,6 +401,7 @@ final class StudioResults {
             if (developed || !ValueAnimator.areAnimatorsEnabled()) return;
             developed = true;
             ValueAnimator motion = ValueAnimator.ofFloat(0f, 1f);
+            development = motion;
             motion.setDuration(900);
             motion.setInterpolator(new DecelerateInterpolator(1.6f));
             motion.addUpdateListener(value -> {
@@ -434,7 +437,7 @@ final class StudioResults {
         TextView text = ui.text(entry.prompt, 15, INK, false);
         text.setLineSpacing(ui.dp(5), 1f);
         text.setTextIsSelectable(true);
-        text.setBackground(ui.shape(ACCENT_SOFT, 13, 0));
+        text.setBackground(ui.shape(RAISED, 13, 0));
         text.setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12));
         sheet.add(text, 0);
         if (!entry.text.isEmpty()) {
@@ -445,7 +448,7 @@ final class StudioResults {
         sheet.action(ui.outline("复制", () -> {
             android.content.ClipboardManager clipboard = activity.getSystemService(android.content.ClipboardManager.class);
             if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Muse 提示词", entry.prompt));
-            android.widget.Toast.makeText(activity, "已复制提示词", android.widget.Toast.LENGTH_SHORT).show();
+            MobileUi.notice(activity, "已复制提示词");
         }), true);
         sheet.action(ui.primary("重新编辑", () -> { sheet.dismiss(); reuse.accept(entry); }), true);
         sheet.show();
@@ -488,7 +491,7 @@ final class StudioResults {
         TextView copy = darkButton("复制提示词", 0, () -> {
             android.content.ClipboardManager clipboard = activity.getSystemService(android.content.ClipboardManager.class);
             if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Muse 提示词", entry.prompt));
-            android.widget.Toast.makeText(activity, "已复制提示词", android.widget.Toast.LENGTH_SHORT).show();
+            MobileUi.notice(activity, "已复制提示词");
         });
         LinearLayout.LayoutParams copyPosition = new LinearLayout.LayoutParams(-2, ui.dp(38));
         copyPosition.setMarginStart(ui.dp(8));

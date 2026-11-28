@@ -1,28 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 白昼：浅色主题。暗房色板见 values-night/colors.xml。 -->
-    <color name="muse_bg">#FFF4F3F0</color>
+    <color name="muse_bg">#FFF6F6F4</color>
     <color name="muse_surface">#FFFFFFFF</color>
-    <color name="muse_raised">#FFEAE8E4</color>
-    <color name="muse_line">#14161513</color>
-    <color name="muse_line_strong">#29161513</color>
-    <color name="muse_text">#FF161513</color>
-    <color name="muse_text2">#FF5F5B54</color>
-    <color name="muse_muted">#FF8A857C</color>
-    <color name="muse_accent">#FFE2431E</color>
+    <color name="muse_raised">#FFECECE8</color>
+    <color name="muse_active_card">#FFFFFFFF</color>
+    <color name="muse_line">#FFE2E2DD</color>
+    <color name="muse_line_strong">#FFCFCFC7</color>
+    <color name="muse_text">#FF141413</color>
+    <color name="muse_text2">#FF52525B</color>
+    <color name="muse_muted">#FF8E8E93</color>
+    <color name="muse_accent">#FFE84D2B</color>
     <color name="muse_on_accent">#FFFFFFFF</color>
-    <color name="muse_accent_soft">#1AE2431E</color>
-    <color name="muse_scrim">#57161513</color>
+    <color name="muse_accent_soft">#1AE84D2B</color>
+    <color name="muse_scrim">#57141416</color>
     <color name="muse_progress">#FF426B53</color>
     <color name="muse_chrome">@color/muse_bg</color>
     <!-- 额度色阶：已用 0 / 45 / 65 / 82 / 95%，之间连续插值。白底上均 ≥ 3.4:1。 -->
-    <color name="muse_quota_0">#FF16865A</color>
-    <color name="muse_quota_1">#FF5E8A12</color>
-    <color name="muse_quota_2">#FFA06F00</color>
-    <color name="muse_quota_3">#FFC9520E</color>
-    <color name="muse_quota_4">#FFCC2E1C</color>
+    <color name="muse_quota_0">#FF34C759</color>
+    <color name="muse_quota_1">#FF84CC16</color>
+    <color name="muse_quota_2">#FFF59E0B</color>
+    <color name="muse_quota_3">#FFF97316</color>
+    <color name="muse_quota_4">#FFEF4444</color>
     <!-- 启动（Android 8–11）：系统此时还不知道应用选的主题，固定用暗房色，避免白闪。 -->
-    <color name="muse_launch_bg">#FF0C0B0A</color>
-    <color name="muse_launch_ink">#FFF2EEE6</color>
+    <color name="muse_launch_bg">#FF0E0E10</color>
+    <color name="muse_launch_ink">#FFF4F4F6</color>
     <color name="muse_launch_accent">#FFFF5A36</color>
 </resources>

@@ -17,8 +17,8 @@ final class StudioPromptView extends MaterialTextView {
     private boolean expanded,overflow,dirty=true;
 
     StudioPromptView(Context context,MobileUi ui,String text,Runnable inspect){
-        super(context);full=text==null?"":text;setText(full);setTextSize(14);setTextColor(INK);setIncludeFontPadding(false);setLineSpacing(ui.dp(4),1f);
-        hint=ui.text("",12,TEXT2,true);hint.setMinHeight(ui.dp(48));hint.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        super(context);full=text==null?"":text;setText(full);setTextSize(12.5f);setTextColor(INK);setIncludeFontPadding(false);setLineSpacing(ui.dp(3),1f);
+        hint=ui.text("",11.5f,TEXT2,true);hint.setMinHeight(ui.dp(28));hint.setGravity(android.view.Gravity.CENTER_VERTICAL);
         hint.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);hint.setFocusable(false);hint.setOnClickListener(ignored->toggle());
         setOnLongClickListener(ignored->{inspect.run();return true;});
     }

@@ -30,9 +30,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
-import com.google.android.material.snackbar.Snackbar;
 import androidx.webkit.WebViewFeature;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -83,17 +81,19 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private String openingQuickAccount = "";
     private androidx.appcompat.app.AlertDialog deleteConfirmation;
     private AccountStore.Account deleteTarget;
-    private FrameLayout quickSwitch;
-    private ImageView quickSwitchPhoto;
-    private TextView quickSwitchInitial, quickSwitchCount;
     private android.widget.PopupWindow accountMenu;
-    private boolean switchTucked, switchPeeking, switchRight = true, switchLongPressed;
-    private float switchY = 0.3f;
     private TextView webTitle, webSubtitle, webNotice, studioTitle, studioSubtitle;
     private LinearLayout studioAccount;
     private ImageButton sidebarToggle, webBack, submitButton;
     private MobileUi.Segment studioMode;
-    private TextView studioAccountValue, studioAccountAvatar;
+    private TextView studioAccountValue;
+    private AccountFace studioAccountAvatar;
+    private View studioQuotaDot, webQuotaDot;
+    private View messagePill;
+    private final Handler messageHandler = new Handler(Looper.getMainLooper());
+    private final Runnable hideMessage = this::fadeMessage;
+    private String generationAccountId = "";
+    private MobileUi.Sheet generationSheet;
     private LinearLayout studioComposer;
     private ImageButton studioReferenceButton;
     private LinearLayout studioReferenceStrip;
@@ -123,8 +123,6 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private String referencePickerSession = "", studioReferenceSignature = "";
     private StudioSession pendingComposerSession;
     private int pendingComposerHeight;
-    private float switchTouchX, switchTouchY, switchStartTranslationX, switchStartTranslationY;
-    private boolean switchDragging;
     private final Runnable persistComposerHeight = () -> {
         if (pendingComposerSession != null && pendingComposerHeight > 0) {
             studio.updateComposerHeight(pendingComposerSession, pendingComposerHeight);
@@ -227,32 +225,25 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         root.addView(main, new FrameLayout.LayoutParams(-1, -1));
         body = new FrameLayout(this);
         main.addView(body, new LinearLayout.LayoutParams(-1, 0, 1f));
-        quickSwitch = buildQuickSwitch();
         sidebar = new AccountSidebar(this, ui, this, proxies);
-        root.addView(quickSwitch, new FrameLayout.LayoutParams(ui.dp(SWITCH_SIZE), ui.dp(SWITCH_SIZE), Gravity.TOP | Gravity.START));
         root.addView(sidebar, new FrameLayout.LayoutParams(-1, -1));
         root.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) placeQuickSwitch(false, null);
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) dismissAccountMenu();
         });
         configureInsets(workerHost);
         setContentView(root);
         applyBarAppearance();
         ViewCompat.requestApplyInsets(root);
-        restoreQuickSwitchPosition();
         showScreen(screen);
         ready = true;
     }
-
-    // ---------- 浮动账号头像：显示当前账号头像，可拖动；拖到屏幕边缘后收起，只露出一小部分 ----------
-    // 容器 60dp，里面是 54dp 的圆形头像框（四周 3dp 留给右上角的数量角标）。
-    private static final int SWITCH_SIZE = 60, SWITCH_RING = 54, SWITCH_PEEK = 23, SWITCH_EDGE = 7;
 
     private static final android.view.animation.PathInterpolator ENTER_EASE =
         new android.view.animation.PathInterpolator(0.2f, 0.8f, 0.2f, 1f);
 
     /**
      * 冷启动过渡：启动标像安全灯熄灭一样缩小淡出，暗房底色退去；主界面从模糊、发暗“显影”出来，
-     * 输入托盘从底部升起，悬浮头像最后淡入。不额外拖延启动：首帧画好就开始，约 0.55 秒结束。
+     * 输入托盘从底部升起。不额外拖延启动：首帧画好就开始，约 0.55 秒结束。
      * Android 12+ 接管系统启动画面的退场；Android 8–11 用一层与启动窗口完全重合的遮罩做同样的事。
      */
     private void startEntrance(boolean cold) {
@@ -301,7 +292,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         }));
     }
 
-    /** 显影：模糊 14dp→0、饱和度与亮度回到正常（Android 12+）；整体上移 10dp；输入托盘升起；悬浮头像淡入。 */
+    /** 显影：模糊 14dp→0、饱和度与亮度回到正常（Android 12+）；整体上移 10dp；输入托盘升起。 */
     private void revealInterface() {
         if (main == null) return;
         float unit = ui.dp(1);
@@ -340,106 +331,6 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             tray.animate().translationY(0f).setStartDelay(120).setDuration(460).setInterpolator(ENTER_EASE)
                 .withEndAction(() -> tray.setTranslationY(0f)).start();
         }
-        View bubble = quickSwitch;
-        if (bubble != null && bubble.getVisibility() == View.VISIBLE) {
-            // 不用 animate()：摆放悬浮头像时会 cancel 它的属性动画。
-            android.animation.ObjectAnimator fade = android.animation.ObjectAnimator.ofFloat(bubble, View.ALPHA, 0f, 1f);
-            fade.setStartDelay(320);
-            fade.setDuration(240);
-            fade.addListener(new android.animation.AnimatorListenerAdapter() {
-                @Override public void onAnimationEnd(android.animation.Animator animation) { bubble.setAlpha(1f); }
-            });
-            bubble.setAlpha(0f);
-            fade.start();
-        }
-    }
-
-    private FrameLayout buildQuickSwitch() {
-        FrameLayout bubble = new FrameLayout(this);
-        bubble.setClipChildren(false);
-        bubble.setClipToPadding(false);
-        bubble.setFocusable(true);
-        bubble.setClickable(true);
-
-        FrameLayout ring = new FrameLayout(this);
-        android.graphics.drawable.GradientDrawable disc = new android.graphics.drawable.GradientDrawable();
-        disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        disc.setColor(SURFACE);
-        disc.setStroke(ui.dp(1), LINE_STRONG);
-        ring.setBackground(disc);
-        ring.setElevation(ui.dp(4));
-        ring.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            ring.setOutlineAmbientShadowColor(0xFF000000);
-            ring.setOutlineSpotShadowColor(0xFF000000);
-        }
-        int inner = ui.dp(44);
-        quickSwitchInitial = ui.avatar("M", "", 44);
-        ring.addView(quickSwitchInitial, new FrameLayout.LayoutParams(inner, inner, Gravity.CENTER));
-        quickSwitchPhoto = new ImageView(this);
-        quickSwitchPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        android.graphics.drawable.GradientDrawable photoShape = new android.graphics.drawable.GradientDrawable();
-        photoShape.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        photoShape.setColor(RAISED);
-        quickSwitchPhoto.setBackground(photoShape);
-        quickSwitchPhoto.setClipToOutline(true);
-        quickSwitchPhoto.setVisibility(View.GONE);
-        ring.addView(quickSwitchPhoto, new FrameLayout.LayoutParams(inner, inner, Gravity.CENTER));
-        bubble.addView(ring, new FrameLayout.LayoutParams(ui.dp(SWITCH_RING), ui.dp(SWITCH_RING), Gravity.CENTER));
-
-        // 可用账号数：压在头像框右上角外侧，和设计稿一致。
-        quickSwitchCount = ui.figure("", 11, ON_ACCENT);
-        quickSwitchCount.setGravity(Gravity.CENTER);
-        quickSwitchCount.setMinWidth(ui.dp(19));
-        quickSwitchCount.setPadding(ui.dp(5), 0, ui.dp(5), 0);
-        android.graphics.drawable.GradientDrawable pill = new android.graphics.drawable.GradientDrawable();
-        pill.setColor(ACCENT);
-        pill.setCornerRadius(ui.dp(10));
-        quickSwitchCount.setBackground(pill);
-        quickSwitchCount.setElevation(ui.dp(11));
-        quickSwitchCount.setVisibility(View.GONE);
-        bubble.addView(quickSwitchCount, new FrameLayout.LayoutParams(-2, ui.dp(19), Gravity.TOP | Gravity.END));
-        bubble.setOnClickListener(view -> tapQuickSwitch());
-        bubble.setLongClickable(true);
-        bubble.setOnLongClickListener(view -> {
-            dismissAccountMenu();
-            switchPeeking = false;
-            openSidebar();
-            return true;
-        });
-        bubble.setOnTouchListener(this::dragQuickSwitch);
-        return bubble;
-    }
-
-    /** 当前账号头像（已同步的 Muse 头像优先，否则用首字）与可用账号数。 */
-    private void updateQuickSwitchFace() {
-        if (quickSwitch == null || accounts == null) return;
-        AccountStore.Account account = current();
-        String name = account == null ? "Muse" : account.name;
-        TextView fresh = ui.avatar(name, account == null ? "" : account.id, 44);
-        quickSwitchInitial.setText(fresh.getText());
-        quickSwitchInitial.setTextColor(fresh.getCurrentTextColor());
-        quickSwitchInitial.setBackground(fresh.getBackground());
-        android.graphics.Bitmap photo = account == null || quotas == null ? null : quotas.avatar(account.id);
-        quickSwitchPhoto.setImageBitmap(photo);
-        quickSwitchPhoto.setVisibility(photo == null ? View.GONE : View.VISIBLE);
-        int usable = 0;
-        for (AccountStore.Account item : accounts.all()) if (accounts.usable(item, multiProfile) && !exhausted(item)) usable++;
-        // 头像外圈：当前账号的额度颜色，一眼看出还剩多少。
-        if (quickSwitchInitial.getParent() instanceof View ring
-            && ring.getBackground() instanceof android.graphics.drawable.GradientDrawable disc) {
-            AccountQuota quota = account == null || quotas == null ? null : quotas.value(account.id);
-            long now = System.currentTimeMillis();
-            boolean known = quota != null && quota.currentWeek(now);
-            int tone = !known ? LINE_STRONG : quota.used() == null ? Q0 : MobileUi.quotaColor(quota.used());
-            disc.setStroke(ui.dp(known ? 2 : 1), tone);
-        }
-        quickSwitchCount.setText(String.valueOf(usable));
-        quickSwitchCount.setVisibility(usable > 1 && (!switchTucked || switchPeeking) ? View.VISIBLE : View.GONE);
-        String label = "快速切换 Muse 账号 · 当前：" + name + (switchTucked && !switchPeeking ? "（已收起，点按展开）" : "")
-            + "，长按打开侧边栏";
-        quickSwitch.setContentDescription(label);
-        quickSwitch.setTooltipText(label);
     }
 
     /** 本周额度已用完（只看本周有效的同步结果）。 */
@@ -450,139 +341,6 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         return used != null && used >= 100;
     }
 
-    private float switchWidth() { return root.getWidth() - root.getPaddingLeft() - root.getPaddingRight(); }
-    private float switchMinY() { return topInset + ui.dp(8); }
-    private float switchMaxY() {
-        return Math.max(switchMinY(), root.getHeight() - bottomInset - ui.dp(SWITCH_SIZE) - ui.dp(8));
-    }
-
-    private float switchRestX(boolean right) {
-        return right ? switchWidth() - ui.dp(SWITCH_SIZE) - ui.dp(SWITCH_EDGE) : ui.dp(SWITCH_EDGE);
-    }
-
-    private float switchTuckX(boolean right) {
-        return right ? switchWidth() - ui.dp(SWITCH_PEEK) : -(ui.dp(SWITCH_SIZE) - ui.dp(SWITCH_PEEK));
-    }
-
-    /** 按记住的边、高度和收起状态摆放；animate 为 true 时平滑移动。 */
-    private void placeQuickSwitch(boolean animate, Runnable done) {
-        if (quickSwitch == null || root == null) return;
-        if (root.getWidth() == 0) { quickSwitch.post(() -> placeQuickSwitch(animate, done)); return; }
-        float x = switchTucked && !switchPeeking ? switchTuckX(switchRight) : switchRestX(switchRight);
-        float y = switchMinY() + Math.max(0f, Math.min(1f, switchY)) * (switchMaxY() - switchMinY());
-        quickSwitch.animate().cancel();
-        if (animate && android.animation.ValueAnimator.areAnimatorsEnabled()) {
-            quickSwitch.animate().translationX(x).translationY(y).scaleX(1f).scaleY(1f).setDuration(260)
-                .setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0.8f, 0.2f, 1f))
-                .withEndAction(() -> { if (done != null) done.run(); }).start();
-        } else {
-            quickSwitch.setTranslationX(x);
-            quickSwitch.setTranslationY(y);
-            quickSwitch.setScaleX(1f);
-            quickSwitch.setScaleY(1f);
-            if (done != null) done.run();
-        }
-        updateQuickSwitchFace();
-    }
-
-    /** 长按浮动头像：打开侧边栏。 */
-    private final Runnable switchLongPress = () -> {
-        if (switchDragging || quickSwitch == null) return;
-        switchLongPressed = true;
-        quickSwitch.performLongClick();
-    };
-
-    private boolean dragQuickSwitch(View view, MotionEvent event) {
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN -> {
-                view.animate().cancel();
-                switchTouchX = event.getRawX(); switchTouchY = event.getRawY();
-                switchStartTranslationX = view.getTranslationX(); switchStartTranslationY = view.getTranslationY();
-                switchDragging = false;
-                switchLongPressed = false;
-                view.removeCallbacks(switchLongPress);
-                view.postDelayed(switchLongPress, android.view.ViewConfiguration.getLongPressTimeout());
-                return true;
-            }
-            case MotionEvent.ACTION_MOVE -> {
-                if (switchLongPressed) return true;
-                float dx = event.getRawX() - switchTouchX, dy = event.getRawY() - switchTouchY;
-                if (!switchDragging && dx * dx + dy * dy > ui.dp(8) * ui.dp(8)) {
-                    view.removeCallbacks(switchLongPress);
-                    switchDragging = true;
-                    dismissAccountMenu();
-                    quickSwitchCount.setVisibility(View.GONE);
-                    view.setScaleX(1.08f);
-                    view.setScaleY(1.08f);
-                }
-                if (switchDragging) {
-                    // 允许拖出屏幕边缘，但至少留出一小部分可以再拖回来。
-                    float x = Math.max(switchTuckX(false), Math.min(switchTuckX(true), switchStartTranslationX + dx));
-                    float y = Math.max(switchMinY(), Math.min(switchMaxY(), switchStartTranslationY + dy));
-                    view.setTranslationX(x);
-                    view.setTranslationY(y);
-                }
-                return true;
-            }
-            case MotionEvent.ACTION_UP -> {
-                view.removeCallbacks(switchLongPress);
-                if (switchLongPressed) { /* 已打开侧边栏 */ }
-                else if (switchDragging) settleQuickSwitch(view);
-                else view.performClick();
-                switchDragging = false; switchLongPressed = false; return true;
-            }
-            case MotionEvent.ACTION_CANCEL -> {
-                view.removeCallbacks(switchLongPress);
-                if (switchDragging) settleQuickSwitch(view);
-                switchDragging = false; switchLongPressed = false; return true;
-            }
-            default -> { return false; }
-        }
-    }
-
-    /** 松手：吸附到最近的左/右边；超出边缘四分之一以上就收起，只露出一小部分。 */
-    private void settleQuickSwitch(View view) {
-        float size = ui.dp(SWITCH_SIZE), x = view.getTranslationX(), width = switchWidth();
-        switchRight = x + size / 2f >= width / 2f;
-        switchTucked = switchRight ? x > width - size * 0.75f : x < -size * 0.25f;
-        switchPeeking = false;
-        float range = switchMaxY() - switchMinY();
-        switchY = range <= 0 ? 0f : (view.getTranslationY() - switchMinY()) / range;
-        storeQuickSwitchPosition();
-        placeQuickSwitch(true, null);
-    }
-
-    /** 点按：收起状态先滑出再打开；菜单或侧栏关闭后再收回。 */
-    private void tapQuickSwitch() {
-        if (switchTucked && !switchPeeking) {
-            switchPeeking = true;
-            placeQuickSwitch(true, this::showQuickSwitch);
-        } else showQuickSwitch();
-    }
-
-    private void retuckQuickSwitch() {
-        if (!switchPeeking) return;
-        switchPeeking = false;
-        if (quickSwitch != null && quickSwitch.getVisibility() == View.VISIBLE) placeQuickSwitch(true, null);
-        else placeQuickSwitch(false, null);
-    }
-
-    private void restoreQuickSwitchPosition() {
-        android.content.SharedPreferences saved = getSharedPreferences("muse-ui", MODE_PRIVATE);
-        switchRight = saved.getBoolean("switch-right", true);
-        switchY = saved.getFloat("switch-y", 0.3f);
-        switchTucked = saved.getBoolean("switch-tucked", false);
-        switchPeeking = false;
-        placeQuickSwitch(false, null);
-    }
-
-    private void storeQuickSwitchPosition() {
-        getSharedPreferences("muse-ui", MODE_PRIVATE).edit()
-            .putBoolean("switch-right", switchRight)
-            .putFloat("switch-y", switchY)
-            .putBoolean("switch-tucked", switchTucked).apply();
-    }
-
     private void dismissAccountMenu() {
         android.widget.PopupWindow menu = accountMenu;
         accountMenu = null;
@@ -591,164 +349,100 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         }
     }
 
-    private static int all(List<AccountStore.Account> list) { return list == null ? 0 : list.size(); }
-
-    private View menuAction(int icon, String label, Runnable action) {
-        LinearLayout row = ui.row();
-        row.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(10));
-        row.addView(ui.iconView(icon, TEXT2, 18));
-        TextView text = ui.text(label, 13.5f, INK, false);
-        LinearLayout.LayoutParams textPosition = new LinearLayout.LayoutParams(0, -2, 1);
-        textPosition.setMarginStart(ui.dp(12));
-        row.addView(text, textPosition);
-        row.setContentDescription(label);
-        ui.touch(row, Color.TRANSPARENT, 12, 0, action);
-        return row;
+    private View quotaDot() {
+        View dot = new View(this);
+        dot.setLayoutParams(new LinearLayout.LayoutParams(ui.dp(6), ui.dp(6)));
+        dot.setBackground(ui.shape(AccountChoices.tone(current() == null ? null : quotas.value(current().id)), 99, 0));
+        return dot;
     }
 
-    private View quickAccountCell(AccountStore.Account account, boolean on, android.widget.PopupWindow popup, long now) {
-        boolean usable = accounts.usable(account, multiProfile);
-        boolean exhausted = exhausted(account);
-        boolean started = browser.isOpen(account.id) || browser.isParked(account.id);
-        boolean selectable = on || usable && !exhausted;
-        String lifecycle = browser.isParked(account.id) ? "后台保留" : started ? "已启动" : "未启动";
-        AccountQuota quota = quotas.value(account.id);
-        boolean oldPeriod = quota != null && quota.resets() > quota.observed() && quota.resets() <= now;
-        String detail = quota == null || oldPeriod ? "周额度待获取" : quota.used() == null ? "周额度不限量" : "周额度" + Math.round(quota.used()) + "%";
-        String unavailable = !usable ? "需更新 WebView" : exhausted && !on ? "额度已用完" : "";
-        LinearLayout cell = ui.column();
-        cell.setGravity(Gravity.CENTER_HORIZONTAL);
-        cell.setMinimumHeight(ui.dp(86));
-        cell.setPadding(ui.dp(4), ui.dp(8), ui.dp(4), ui.dp(8));
-        cell.setSelected(on);
-        FrameLayout face = new FrameLayout(this);
-        face.addView(ui.avatar(account.name, account.id, 30), new FrameLayout.LayoutParams(ui.dp(30), ui.dp(30)));
-        android.graphics.Bitmap photo = quotas.avatar(account.id);
-        if (photo != null) {
-            ImageView image = new ImageView(this);
-            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            image.setImageBitmap(photo);
-            image.setBackground(ui.shape(RAISED, 15, 0));
-            image.setClipToOutline(true);
-            face.addView(image, new FrameLayout.LayoutParams(ui.dp(30), ui.dp(30)));
-        }
-        if (on) face.addView(ui.iconView(R.drawable.ic_check, ACCENT, 14),
-            new FrameLayout.LayoutParams(ui.dp(14), ui.dp(14), Gravity.END | Gravity.BOTTOM));
-        face.setAlpha(!selectable ? 0.4f : started ? 1f : 0.5f);
-        cell.addView(face, new LinearLayout.LayoutParams(ui.dp(30), ui.dp(30)));
-        TextView name = ui.single(ui.text(account.name, 12.5f, INK, true));
-        name.setMinWidth(0);
-        name.setGravity(Gravity.CENTER);
-        name.setAlpha(!selectable ? 0.4f : started ? 1f : 0.5f);
-        ui.block(cell, name, 5);
-        TextView status = ui.single(ui.text(detail, 12, TEXT2, false));
-        status.setMinWidth(0);
-        status.setGravity(Gravity.CENTER);
-        ui.block(cell, status, 2);
-        String description = account.name + "，" + lifecycle + (on ? "，当前账号" : "")
-            + "，" + detail + (quota == null ? "" : "，" + quota.weekly(now)) + (selectable ? "" : "，" + unavailable + "，不可选");
-        cell.setContentDescription(description);
-        cell.setTooltipText(description);
-        cell.setEnabled(selectable);
-        if (selectable) ui.touch(cell, on ? ACCENT_SOFT : SURFACE, 9, LINE, () -> {
-            popup.dismiss();
-            switchQuickAccount(account);
+    private void updateQuotaDots() {
+        if (accounts == null || quotas == null) return;
+        AccountStore.Account account = current();
+        int tone = AccountChoices.tone(account == null ? null : quotas.value(account.id));
+        for (View dot : new View[]{studioQuotaDot, webQuotaDot}) if (dot != null) dot.setBackground(ui.shape(tone, 99, 0));
+    }
+
+    /** Header long press never falls through to the short tap action. */
+    private void accountTrigger(View anchor) {
+        anchor.setFocusable(true);
+        anchor.setOnLongClickListener(view -> {
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            showAccountMenu(view);
+            return true;
         });
-        return cell;
     }
 
-    /** 三列快速切号菜单，启动状态只读；只在用户点选后打开账号。 */
-    private void showAccountMenu(List<AccountStore.Account> available) {
+    private void showAccountMenu(View anchor) {
         dismissAccountMenu();
-        if (quickSwitch == null || root == null || root.getWindowToken() == null || root.getWidth() <= ui.dp(16)) return;
-        int width = Math.min(ui.dp(276), root.getWidth() - ui.dp(16));
-        LinearLayout menu = ui.column();
-        menu.setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8));
-        TextView title = ui.text("快速切换账号", 12, TEXT2, false);
-        title.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(8));
-        menu.addView(title);
-        LinearLayout grid = ui.column();
-        menu.addView(grid, new LinearLayout.LayoutParams(-1, -2));
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(false);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.addView(menu, new ScrollView.LayoutParams(-1, -2));
-        android.widget.PopupWindow popup = new android.widget.PopupWindow(scroll, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
-        AccountStore.Account selected = current();
-        long now = System.currentTimeMillis();
-        for (int start = 0; start < available.size(); start += 3) {
-            LinearLayout row = ui.row();
-            row.setGravity(Gravity.TOP);
-            for (int column = 0; column < 3; column++) {
-                int index = start + column;
-                View cell = index < available.size() ? quickAccountCell(available.get(index), available.get(index) == selected, popup, now) : new View(this);
-                LinearLayout.LayoutParams position = new LinearLayout.LayoutParams(0, -2, 1);
-                if (column > 0) position.setMarginStart(ui.dp(6));
-                row.addView(cell, position);
-            }
-            ui.block(grid, row, start == 0 ? 0 : 6);
-        }
-        // 只保留原添加入口；账号管理仍在侧栏。
-        View divider = new View(this);
-        divider.setBackgroundColor(LINE);
-        LinearLayout.LayoutParams dividerPosition = new LinearLayout.LayoutParams(-1, ui.dp(1));
-        dividerPosition.setMargins(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(4));
-        menu.addView(divider, dividerPosition);
-        if (multiProfile) menu.addView(menuAction(R.drawable.ic_user_plus, "添加账号", () -> {
-            popup.dismiss();
-            editAccount(null);
-        }));
-        if (!multiProfile) {
-            TextView note = ui.text("WebView 不支持多账号", 11.5f, MUTED, false);
-            note.setPadding(ui.dp(10), ui.dp(4), ui.dp(10), ui.dp(6));
-            menu.addView(note);
-        }
-        popup.setBackgroundDrawable(ui.shape(SURFACE, 20, LINE_STRONG));
-        popup.setElevation(ui.dp(14));
-        popup.setOutsideTouchable(true);
-        popup.setOnDismissListener(() -> {
-            if (accountMenu == popup) accountMenu = null;
-            retuckQuickSwitch();
+        if (closing || isFinishing() || isDestroyed() || !anchor.isAttachedToWindow() || root.getWindowToken() == null) return;
+        boolean grid = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("header-account-grid", false);
+        List<AccountStore.Account> ordered = AccountChoices.sorted(accounts.all(), current(), quotas,
+            account -> accounts.usable(account, multiProfile), true);
+        int[] origin = new int[2], trigger = new int[2];
+        root.getLocationInWindow(origin); anchor.getLocationInWindow(trigger);
+        android.graphics.Rect visible = new android.graphics.Rect(); root.getWindowVisibleDisplayFrame(visible);
+        int width = Math.min(ui.dp(288), root.getWidth() - root.getPaddingLeft() - root.getPaddingRight() - ui.dp(16));
+        int y = Math.max(origin[1] + topInset + ui.dp(4), trigger[1] + anchor.getHeight() + ui.dp(6));
+        int bottom = Math.min(origin[1] + root.getHeight() - root.getPaddingBottom(), visible.bottom);
+        int limit = Math.min(ui.dp(490), bottom - y - ui.dp(8));
+        if (width <= 0 || limit < ui.dp(92)) return;
+        LinearLayout panel = ui.column();
+        panel.setBackground(ui.shape(SURFACE, 20, LINE_STRONG));
+        panel.setPadding(ui.dp(8), ui.dp(4), ui.dp(8), ui.dp(4));
+        LinearLayout header = ui.row(); header.setPadding(ui.dp(4), 0, ui.dp(4), 0);
+        header.addView(ui.single(ui.text("快速切换账号 " + ordered.size(), 12, TEXT2, true)), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView toggle = ui.meta(grid ? "切单列" : "切双列", 10, TEXT2);
+        toggle.setGravity(Gravity.CENTER); toggle.setPadding(ui.dp(6), ui.dp(3), ui.dp(6), ui.dp(3));
+        ui.touch(toggle, RAISED, 6, 0, () -> {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("header-account-grid", !grid).apply();
+            showAccountMenu(anchor);
         });
-        int maxHeight = Math.max(1, root.getHeight() - topInset - root.getPaddingBottom() - ui.dp(20));
-        scroll.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST));
-        int height = scroll.getMeasuredHeight();
-        popup.setHeight(height);
-        int[] origin = new int[2];
-        root.getLocationInWindow(origin);
-        int size = ui.dp(SWITCH_SIZE);
-        int bubbleX = origin[0] + root.getPaddingLeft() + Math.round(quickSwitch.getTranslationX());
-        int bubbleY = origin[1] + Math.round(quickSwitch.getTranslationY());
-        int x = switchRight ? bubbleX - width - ui.dp(10) : bubbleX + size + ui.dp(10);
-        x = Math.max(origin[0] + ui.dp(8), Math.min(origin[0] + root.getWidth() - width - ui.dp(8), x));
-        int y = bubbleY + size / 2 - ui.dp(56);
-        int maxY = origin[1] + root.getHeight() - root.getPaddingBottom() - height - ui.dp(12);
-        y = Math.max(origin[1] + topInset + ui.dp(8), Math.min(maxY, y));
-        accountMenu = popup;
-        try { popup.showAtLocation(root, Gravity.NO_GRAVITY, x, y); }
-        catch (RuntimeException error) { accountMenu = null; retuckQuickSwitch(); }
-    }
-
-    private void updateQuickSwitchVisibility() {
-        if (quickSwitch == null || sidebar == null || accounts == null) return;
-        boolean visible = screen != PROXIES && videoView == null && !sidebar.isOpen();
-        quickSwitch.setVisibility(visible ? View.VISIBLE : View.GONE);
-    }
-
-    private void showQuickSwitch() {
-        List<AccountStore.Account> all = accounts.all();
-        if (all.isEmpty()) {
-            openSidebar();
-            sidebar.showSessions(false);
-            return;
+        header.addView(toggle); panel.addView(header, new LinearLayout.LayoutParams(-1, ui.rowHeight(34)));
+        LinearLayout list = ui.column();
+        android.widget.PopupWindow popup = new android.widget.PopupWindow(panel, width, -2, true);
+        for (int start = 0; start < ordered.size(); start += grid ? 2 : 1) {
+            LinearLayout line = ui.row();
+            for (int column = 0; column < (grid ? 2 : 1); column++) {
+                int index = start + column;
+                View cell;
+                if (index < ordered.size()) {
+                    AccountStore.Account account = ordered.get(index);
+                    cell = AccountChoices.row(this, ui, account, quotas, proxies, account == current(), accounts.usable(account, multiProfile),
+                        browser.isParked(account.id), grid, false, () -> { popup.dismiss(); switchQuickAccount(account); });
+                } else cell = new View(this);
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, ui.rowHeight(grid ? 42 : 40), 1);
+                if (column > 0) p.setMarginStart(ui.dp(6)); line.addView(cell, p);
+            }
+            ui.block(list, line, start == 0 ? 0 : grid ? 6 : 2);
         }
-        // 只读启动状态；未启动灰显但仍可点选，真正不可用的账号保留保护。
-        showAccountMenu(new java.util.ArrayList<>(all));
+        ScrollView scroll = new ScrollView(this); scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
+        int maxList = Math.max(1, limit - ui.rowHeight(34) - ui.rowHeight(26) - ui.dp(8));
+        scroll.measure(View.MeasureSpec.makeMeasureSpec(width - ui.dp(16), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxList, View.MeasureSpec.AT_MOST));
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, scroll.getMeasuredHeight()));
+        int parked = browser.parkedCount();
+        TextView footer = ui.single(ui.meta("后台保留 " + parked + " / " + browser.parkCapacity() + " 个网页", 9.5f, MUTED));
+        footer.setGravity(Gravity.CENTER_VERTICAL); footer.setPadding(ui.dp(4), 0, ui.dp(4), 0);
+        panel.addView(footer, new LinearLayout.LayoutParams(-1, ui.rowHeight(26)));
+        panel.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(limit, View.MeasureSpec.AT_MOST));
+        popup.setHeight(panel.getMeasuredHeight());
+        popup.setBackgroundDrawable(ui.shape(SURFACE, 20, LINE_STRONG)); popup.setElevation(ui.dp(14));
+        popup.setOutsideTouchable(true); popup.setInputMethodMode(android.widget.PopupWindow.INPUT_METHOD_NOT_NEEDED);
+        popup.setOnDismissListener(() -> { if (accountMenu == popup) accountMenu = null; });
+        int left = origin[0] + root.getPaddingLeft() + ui.dp(8);
+        int x = Math.max(left, Math.min(trigger[0], origin[0] + root.getWidth() - root.getPaddingRight() - width - ui.dp(8)));
+        accountMenu = popup;
+        try { popup.showAtLocation(root, Gravity.TOP | Gravity.LEFT, x, y); }
+        catch (RuntimeException unavailable) { accountMenu = null; }
     }
 
     /** 快速切号：不管当前在哪个页面，都打开所选账号的网页。 */
     private void switchQuickAccount(AccountStore.Account account) {
+        if (studio.running() != null && !studio.accountInUse(account.id)) {
+            message("请等当前任务结束，或先停止生成再切换账号。"); return;
+        }
         if (account == current() && screen == WEB && browser.view() != null) return;
         syncStudioDraft();
         boolean different = account != current();
@@ -771,7 +465,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             topInset = safe.top;
             bottomInset = safe.bottom;
             root.setPadding(safe.left, 0, safe.right, Math.max(safe.bottom, input.bottom));
-            quickSwitch.post(() -> { if (!switchDragging) placeQuickSwitch(false, null); });
+            dismissAccountMenu();
+            positionMessage();
             main.setPadding(0, topInset, 0, 0);
             workerHost.setPadding(0, topInset, 0, 0);
             sidebar.setTopInset(topInset);
@@ -807,7 +502,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (sidebar.isOpen() || videoView != null) return;
         hideKeyboard();
         dismissAccountMenu();
-        if (quickSwitch != null) quickSwitch.setVisibility(View.GONE);
+
         renderSidebar();
         main.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         main.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
@@ -820,8 +515,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         main.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
         main.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
         main.setFocusableInTouchMode(true);
-        updateQuickSwitchVisibility();
-        retuckQuickSwitch();
+
         if (!main.isInTouchMode() && sidebarToggle != null) sidebarToggle.requestFocus();
     }
 
@@ -913,15 +607,19 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (account == current()) return true;
         if (!accounts.usable(account, multiProfile)) return false;
         if (screen == STUDIO) {
-            chooseAccount(account);
-            if (account != current()) return false;
+            syncStudioDraft();
+            if (!select(account)) return false;
+            generationAccountId = account.id;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("generation-account", account.id).apply();
+            studio.ensureSession(account);
+            renderScreen(STUDIO);
         } else {
             syncStudioDraft();
             if (!select(account)) return false;
             if (screen == WEB) renderScreen(WEB);
         }
         updateStudioAccount();
-        updateQuickSwitchFace();
+        updateQuotaDots();
         renderSidebar();
         syncCurrentQuota();
         return true;
@@ -956,7 +654,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private boolean canDeleteAccount(AccountStore.Account account) {
         if (account == null || !accounts.all().contains(account)) return false;
         if (!multiProfile) { message("当前 WebView 不支持独立账号，不能删除。"); return false; }
-        if (studio.accountInUse(account.id) || browser.checking() || browser.transferring()) {
+        // Generation may own another account's shared MuseWeb environment.
+        // Rechecked by the positive-button callback before any deletion writes.
+        if (studio.running() != null || browser.checking() || browser.transferring()) {
             message("请等账号任务或网络操作结束后再删除。"); return false;
         }
         return true;
@@ -1009,6 +709,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         studioScroll = null;
         studioTitle = null;
         studioSubtitle = null;
+        studioQuotaDot = null;
+        webQuotaDot = null;
         studioMode = null;
         studioComposer = null;
         studioAccountValue = null;
@@ -1024,8 +726,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         body.addView(next == WEB ? renderWeb() : next == PROXIES ? renderProxyManager() : renderStudio(),
             new FrameLayout.LayoutParams(-1, -1));
         if (!sidebar.isOpen()) main.requestFocus();
-        updateQuickSwitchVisibility();
-        updateQuickSwitchFace();
+
+        updateQuotaDots();
     }
 
     private LinearLayout.LayoutParams headerIconSize() { return new LinearLayout.LayoutParams(ui.dp(36), ui.dp(36)); }
@@ -1033,26 +735,35 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private int rootColor() { return screen == STUDIO ? SURFACE : BG; }
 
     private LinearLayout studioHeader() {
-        LinearLayout toolbar = ui.toolbar();
-        toolbar.addView(sidebarButton());
+        LinearLayout toolbar = ui.compactToolbar();
+        toolbar.setPadding(ui.dp(10), ui.dp(6), ui.dp(10), ui.dp(6));
+        toolbar.addView(sidebarButton(), headerIconSize());
         LinearLayout heading = ui.column();
         heading.setPadding(ui.dp(6), 0, ui.dp(6), 0);
-        studioTitle = ui.single(ui.text("Muse 工作室", 16.5f, INK, true));
+        studioTitle = ui.single(ui.text("Muse 工作室", 15, INK, true));
         heading.addView(studioTitle);
-        studioSubtitle = ui.single(ui.meta("", 10.5f, MUTED));
-        LinearLayout.LayoutParams subtitlePosition = new LinearLayout.LayoutParams(-1, -2);
-        subtitlePosition.topMargin = ui.dp(4);
-        heading.addView(studioSubtitle, subtitlePosition);
+        LinearLayout sub = ui.row();
+        studioQuotaDot = quotaDot(); sub.addView(studioQuotaDot);
+        studioSubtitle = ui.single(ui.meta("", 10, MUTED));
+        LinearLayout.LayoutParams subtitlePosition = new LinearLayout.LayoutParams(0, -2, 1);
+        subtitlePosition.setMarginStart(ui.dp(6));
+        sub.addView(studioSubtitle, subtitlePosition);
+        TextView hint = ui.meta("长按切号", 9, MUTED);
+        hint.setPadding(ui.dp(4), 0, ui.dp(4), 0); hint.setBackground(ui.shape(RAISED, 4, 0));
+        sub.addView(hint);
+        ui.block(heading, sub, 2);
         heading.setOnClickListener(view -> openSidebar());
-        heading.setContentDescription("打开会话列表");
+        accountTrigger(heading);
+        heading.setContentDescription("轻点打开侧边栏，长按快速切换账号");
         toolbar.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        toolbar.addView(ui.iconButton(R.drawable.ic_add, "新建会话", INK, this::newStudioSession));
+        toolbar.addView(ui.compactIconButton(R.drawable.ic_add, "新建会话", INK, this::newStudioSession), headerIconSize());
         updateStudioSessionTitle();
         return toolbar;
     }
 
     private View renderStudio() {
-        StudioSession session = studio.ensureSession(current());
+        StudioSession session = studio.currentSession();
+        if (session == null || accountForSession(session) == null) session = studio.ensureSession(current());
         if (session != null) {
             prompt = session.draft;
             video = session.video;
@@ -1068,7 +779,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         LinearLayout transcript = ui.column();
         // 像聊天一样：内容少时贴在输入框上方，最新的一条在最下面。
         transcript.setGravity(Gravity.BOTTOM);
-        transcript.setPadding(ui.dp(15), ui.dp(16), ui.dp(15), ui.dp(16));
+        transcript.setPadding(ui.dp(14), ui.dp(8), ui.dp(14), ui.dp(16));
         studioResults = new StudioResults(this, ui, studio, this::reusePrompt, this::saveMedia, this::appendStarter);
         ui.block(transcript, studioResults.view, 0);
         studioScroll.addView(transcript, new ScrollView.LayoutParams(-1, -2));
@@ -1107,7 +818,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         LinearLayout shell = ui.column();
         studioComposer = shell;
         shell.setBackground(ui.topShape(SURFACE, R_LG));
-        shell.setPadding(ui.dp(14), 0, ui.dp(14), ui.dp(8));
+        shell.setPadding(ui.dp(14), 0, ui.dp(14), ui.dp(12));
         shell.setElevation(ui.dp(2));
         StudioSession composerSession = studio.currentSession();
         int initialHeight = composerSession == null ? ComposerHeight.DEFAULT_DP : ComposerHeight.clamp(composerSession.composerHeightDp, viewportDp());
@@ -1132,7 +843,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         input.setHint(video ? "描述镜头、动作和氛围…" : "描述你想生成的画面、风格和细节…");
         input.setTextColor(INK);
         input.setHintTextColor(MUTED);
-        input.setTextSize(15);
+        input.setTextSize(14);
         input.setLineSpacing(ui.dp(4), 1f);
         input.setGravity(Gravity.TOP | Gravity.START);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -1213,32 +924,38 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         ratioPosition.setMarginStart(ui.dp(5));
         controls.addView(ratioChip, ratioPosition);
         if (video) {
-            LinearLayout durationChip = ui.chip(null, seconds + " 秒", "视频时长 · " + seconds + " 秒", false, this::chooseDuration);
+            LinearLayout durationChip = ui.chip(null, seconds + "s", "视频时长 · " + seconds + " 秒", false, this::chooseDuration);
             LinearLayout.LayoutParams durationPosition = new LinearLayout.LayoutParams(-2, ui.dp(34));
             durationPosition.setMarginStart(ui.dp(5));
             controls.addView(durationChip, durationPosition);
         }
-        controls.addView(ui.spacer());
+        LinearLayout actionRow = ui.row();
+        android.widget.HorizontalScrollView parameters = new android.widget.HorizontalScrollView(this);
+        parameters.setHorizontalScrollBarEnabled(false);
+        parameters.addView(controls, new FrameLayout.LayoutParams(-2, -2));
+        actionRow.addView(parameters, new LinearLayout.LayoutParams(0, -2, 1));
         // 账号：只显示头像，外圈描边是这个账号的额度颜色；点按换号。
-        AccountStore.Account owner = current();
-        studioAccountAvatar = ui.avatar(owner == null ? "账号" : owner.name, owner == null ? "" : owner.id, 24);
+        AccountStore.Account owner = generationAccount();
+        studioAccountAvatar = new AccountFace(this, ui, owner, COMPOSER_ACTION_SIZE, true, true,
+            owner == null ? null : quotas.value(owner.id), owner == null ? null : quotas.avatar(owner.id));
         studioAccount = ui.row();
         studioAccount.setGravity(Gravity.CENTER);
-        studioAccount.addView(studioAccountAvatar, new LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)));
-        ui.touch(studioAccount, Color.TRANSPARENT, 17, LINE_STRONG, this::pickAccount);
+        studioAccount.addView(studioAccountAvatar, new LinearLayout.LayoutParams(ui.dp(COMPOSER_ACTION_SIZE), ui.dp(COMPOSER_ACTION_SIZE)));
+        ui.touch(studioAccount, Color.TRANSPARENT, 99, 0, this::pickAccount);
         studioAccountValue = null;
-        LinearLayout.LayoutParams accountPosition = new LinearLayout.LayoutParams(ui.dp(34), ui.dp(34));
+        LinearLayout.LayoutParams accountPosition = new LinearLayout.LayoutParams(ui.dp(COMPOSER_ACTION_SIZE), ui.dp(COMPOSER_ACTION_SIZE));
         accountPosition.setMarginStart(ui.dp(5));
-        controls.addView(studioAccount, accountPosition);
+        actionRow.addView(studioAccount, accountPosition);
         updateStudioAccount();
         ImageButton send = ui.sendButton(this::submit);
         send.setContentDescription("发送生成请求");
         send.setTooltipText("发送生成请求");
         submitButton = send;
-        LinearLayout.LayoutParams sendSize = new LinearLayout.LayoutParams(ui.dp(46), ui.dp(46));
-        sendSize.setMarginStart(ui.dp(8));
-        controls.addView(send, sendSize);
-        ui.block(shell, controls, 10);
+        LinearLayout.LayoutParams sendSize = new LinearLayout.LayoutParams(ui.dp(COMPOSER_ACTION_SIZE), ui.dp(COMPOSER_ACTION_SIZE));
+        sendSize.setMarginStart(ui.dp(6));
+        actionRow.addView(send, sendSize);
+        // Parameters can scroll on narrow screens; both primary actions remain visible.
+        ui.block(shell, actionRow, 8);
         return shell;
     }
 
@@ -1514,7 +1231,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
     private void newStudioSession() {
         syncStudioDraft();
-        StudioSession session = studio.createSession(current());
+        StudioSession session = studio.createSession(generationAccount());
         if (session == null) {
             openSidebar();
             sidebar.showSessions(false);
@@ -1541,7 +1258,9 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             message("这个会话对应的账号已移除。");
             return;
         }
-        if (!select(account) || !studio.selectSession(session.id)) return;
+        if (!accounts.usable(account, multiProfile) || !studio.selectSession(session.id)) return;
+        generationAccountId = account.id;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("generation-account", account.id).apply();
         prompt = session.draft;
         video = session.video;
         ratio = session.ratio;
@@ -1561,6 +1280,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private void chooseRatio(String[] ratios) {
         hideKeyboard();
         MobileUi.Sheet sheet = ui.sheet(this, "画幅比例", "选“自动”时由 Muse 按提示词决定，不指定画幅比例。");
+        trackParameterSheet(sheet);
         LinearLayout grid = ui.column();
         LinearLayout line = null;
         for (int index = 0; index < ratios.length; index++) {
@@ -1572,24 +1292,24 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             boolean selected = value.equals(ratio);
             LinearLayout tile = ui.column();
             tile.setGravity(Gravity.CENTER);
-            View box = ui.ratioBox(value, 34, selected ? ACCENT : TEXT2);
+            View box = ui.ratioBox(value, 24, selected ? ACCENT : TEXT2);
             tile.addView(box);
-            TextView label = ui.figure(prettyRatio(value), 13, INK);
+            TextView label = ui.metaStrong(prettyRatio(value), 12, INK);
             label.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams labelPosition = new LinearLayout.LayoutParams(-2, -2);
-            labelPosition.topMargin = ui.dp(10);
+            labelPosition.topMargin = ui.dp(8);
             tile.addView(label, labelPosition);
             tile.setContentDescription("画幅 " + prettyRatio(value) + (selected ? "，已选择" : ""));
             ui.touch(tile, selected ? ACCENT_SOFT : Color.TRANSPARENT, 14, selected ? ACCENT : LINE, () -> {
                 sheet.dismiss();
                 ratio = value; syncStudioDraft(); showScreen(STUDIO);
             });
-            LinearLayout.LayoutParams tilePosition = new LinearLayout.LayoutParams(0, ui.dp(96), 1);
+            LinearLayout.LayoutParams tilePosition = new LinearLayout.LayoutParams(0, ui.rowHeight(80), 1);
             if (index % 3 != 0) tilePosition.setMarginStart(ui.dp(8));
             line.addView(tile, tilePosition);
         }
         if (line != null) while (line.getChildCount() < 3) {
-            LinearLayout.LayoutParams filler = new LinearLayout.LayoutParams(0, ui.dp(96), 1);
+            LinearLayout.LayoutParams filler = new LinearLayout.LayoutParams(0, ui.rowHeight(80), 1);
             filler.setMarginStart(ui.dp(8));
             line.addView(new View(this), filler);
         }
@@ -1600,79 +1320,75 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private void chooseDuration() {
         hideKeyboard();
         MobileUi.Sheet sheet = ui.sheet(this, "视频时长", "时长越长，消耗的周额度越多。");
+        trackParameterSheet(sheet);
         for (int index = 0; index < LENGTHS.length; index++) {
             int value = LENGTHS[index];
             String detail = value <= 6 ? "适合单个镜头" : "适合推拉、转场";
-            sheet.add(ui.option(ui.iconView(R.drawable.ic_duration, TEXT2, 20), value + " 秒", detail, value == seconds, true, () -> {
+            LinearLayout choice = ui.option(null, value + " 秒", detail, value == seconds, true, () -> {
                 sheet.dismiss();
                 seconds = value; syncStudioDraft(); showScreen(STUDIO);
-            }), index == 0 ? 0 : 8);
+            });
+            choice.setMinimumHeight(ui.rowHeight(48)); choice.setPadding(ui.dp(14), ui.dp(5), ui.dp(14), ui.dp(5));
+            LinearLayout words = (LinearLayout) choice.getChildAt(0);
+            TextView duration = (TextView) words.getChildAt(0); duration.setTypeface(MONO_MEDIUM); duration.setTextSize(14);
+            ((TextView) words.getChildAt(1)).setTextSize(11);
+            sheet.add(choice, index == 0 ? 0 : 8);
         }
         sheet.show();
     }
 
+    private void trackParameterSheet(MobileUi.Sheet sheet) {
+        generationSheet = sheet;
+        sheet.dialog.setOnDismissListener(ignored -> { if (generationSheet == sheet) generationSheet = null; });
+    }
+
     private void pickAccount() {
-        List<AccountStore.Account> available = new java.util.ArrayList<>();
-        for (AccountStore.Account account : accounts.all()) if (accounts.usable(account, multiProfile)) available.add(account);
+        List<AccountStore.Account> available = AccountChoices.sorted(accounts.all(), generationAccount(), quotas,
+            account -> accounts.usable(account, multiProfile), false);
         if (available.isEmpty()) { openSidebar(); return; }
         hideKeyboard();
-        MobileUi.Sheet sheet = ui.sheet(this, "选择 Muse 账号", "这个会话的生成会使用所选账号的额度和代理。");
-        AccountStore.Account selected = current();
+        MobileUi.Sheet sheet = ui.sheet(this, video ? "选择生成视频账号" : "选择生图账号", "本次生成将使用所选账号的周额度与对应代理路线。");
+        sheet.limitBodyHeight(378); // 360dp list plus the shared sheet's 18dp body padding.
+        trackParameterSheet(sheet);
+        AccountStore.Account selected = generationAccount();
         for (int index = 0; index < available.size(); index++) {
             AccountStore.Account account = available.get(index);
-            AccountQuota quota = quotas.value(account.id);
-            long now = System.currentTimeMillis();
-            String detail = quota == null ? quotas.state(account.id)
-                : quota.weekly(now) + (quota.resetLabel(now).isEmpty() ? "" : " · " + quota.resetLabel(now));
-            View avatar = ui.avatar(account.name, account.id, 36);
-            sheet.add(ui.option(avatar, account.name, detail, account == selected, true, () -> {
-                sheet.dismiss();
-                chooseAccount(account);
-            }), index == 0 ? 0 : 8);
+            View row = AccountChoices.row(this, ui, account, quotas, proxies, account == selected,
+                accounts.usable(account, multiProfile), false, false, true, () -> { sheet.dismiss(); chooseAccount(account); });
+            sheet.add(row, index == 0 ? 0 : 4);
         }
         sheet.show();
     }
 
     private void chooseAccount(AccountStore.Account account) {
+        if (!accounts.all().contains(account) || !accounts.usable(account, multiProfile) || exhausted(account)) return;
+        if (studio.running() != null) { message("请等当前生成结束后再更换生成账号。"); return; }
+        generationAccountId = account.id;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("generation-account", account.id).apply();
+        updateStudioAccount();
+        message("已选择「" + account.name + "」用于" + (video ? "生成视频" : "生图"));
+    }
+
+    private AccountStore.Account generationAccount() {
+        if (generationAccountId.isEmpty()) generationAccountId = getSharedPreferences(PREFS, MODE_PRIVATE).getString("generation-account", "");
+        for (AccountStore.Account account : accounts.all()) if (account.id.equals(generationAccountId) && accounts.usable(account, multiProfile)) return account;
         StudioSession session = studio.currentSession();
-        if (session != null && session.belongsTo(account.id)) {
-            if (select(account)) updateStudioAccount();
-            return;
-        }
-        syncStudioDraft();
-        if (!select(account)) return;
-        session = studio.createSession(account);
-        session.draft = prompt;
-        session.video = video;
-        session.ratio = ratio;
-        session.seconds = seconds;
-        studio.flushSessions();
-        renderScreen(STUDIO);
+        AccountStore.Account owner = session == null ? null : accountForSession(session);
+        return owner == null ? current() : owner;
     }
 
     private void updateStudioAccount() {
         if (studioAccount == null) return;
-        AccountStore.Account account = current();
+        AccountStore.Account account = generationAccount();
         String name = account == null ? "选择账号" : account.name;
         if (studioAccountValue != null) studioAccountValue.setText(name);
-        if (studioAccountAvatar != null) {
-            TextView fresh = ui.avatar(account == null ? "账号" : account.name, account == null ? "" : account.id, 20);
-            studioAccountAvatar.setText(fresh.getText());
-            studioAccountAvatar.setTextColor(fresh.getCurrentTextColor());
-            studioAccountAvatar.setBackground(fresh.getBackground());
-        }
         AccountQuota quota = account == null || quotas == null ? null : quotas.value(account.id);
-        long now = System.currentTimeMillis();
-        boolean known = quota != null && quota.currentWeek(now);
-        int ring = !known ? LINE_STRONG : quota.used() == null ? Q0 : MobileUi.quotaColor(quota.used());
-        android.graphics.drawable.GradientDrawable edge = new android.graphics.drawable.GradientDrawable();
-        edge.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        edge.setColor(Color.TRANSPARENT);
-        edge.setStroke(ui.dp(known ? 2 : 1), ring);
-        studioAccount.setBackground(new android.graphics.drawable.RippleDrawable(
-            android.content.res.ColorStateList.valueOf(ui.ripple()), edge, null));
-        String usage = !known ? "" : quota.used() == null ? "，不限量" : "，已用 " + Math.round(quota.used()) + "%";
-        String label = account == null ? "选择 Muse 账号" : "账号 · " + name + usage;
+        studioAccount.removeAllViews();
+        studioAccountAvatar = new AccountFace(this, ui, account, COMPOSER_ACTION_SIZE, true, true, quota,
+            account == null ? null : quotas.avatar(account.id));
+        studioAccount.addView(studioAccountAvatar, new LinearLayout.LayoutParams(ui.dp(COMPOSER_ACTION_SIZE), ui.dp(COMPOSER_ACTION_SIZE)));
+        String usage = quota == null ? "，额度待同步" : "，" + quota.weekly(System.currentTimeMillis());
+        String label = (video ? "选择生成视频账号" : "选择生图账号") + " · " + name + usage;
         studioAccount.setContentDescription(label);
         studioAccount.setTooltipText(label);
     }
@@ -1697,17 +1413,44 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     private void generate() {
-        AccountStore.Account account = current();
+        AccountStore.Account account = generationAccount();
         if (account == null) { openSidebar(); return; }
         if (studio.running() != null) return;
+        if (!accounts.usable(account, multiProfile) || exhausted(account)) { message("所选账号当前不可生成，请选择其他账号。"); return; }
+        if (browser.checking() || browser.transferring()) { message("请等网络操作结束后再生成。"); return; }
         if (prompt.trim().isEmpty()) { studioInput.setError("请输入提示词"); return; }
+        // Capture and durably save the source before createSession changes selection.
+        // A paste followed immediately by send must not depend on the 350ms debounce.
+        final String requestPrompt = prompt, requestRatio = ratio;
+        final boolean requestVideo = video;
+        final int requestSeconds = seconds;
+        syncStudioDraft();
         hideKeyboard();
         quotas.cancel();
         StudioSession session = studio.currentSession();
-        if (session == null || !session.belongsTo(account.id)) session = studio.ensureSession(account);
-        studio.start(account, multiProfile, prompt, video, ratio, seconds, session);
-        if (session != null) studio.updateDraft(session, "", video, ratio, seconds);
+        if (session == null || !session.belongsTo(account.id)) {
+            StudioSession previous = session;
+            session = studio.createSession(account);
+            try {
+                if (previous != null) {
+                    session.setReferenceCount(references.copySession(previous.id, session.id), System.currentTimeMillis());
+                    session.composerHeightDp = previous.composerHeightDp;
+                }
+            } catch (IOException failure) {
+                studio.deleteSessions(java.util.Collections.singleton(session.id));
+                if (previous != null) studio.selectSession(previous.id);
+                prompt = requestPrompt; video = requestVideo; ratio = requestRatio; seconds = requestSeconds;
+                // deleteSessions publishes a temporary selection; restore every view and
+                // its reference-removal closures to the recovered source session.
+                renderScreen(STUDIO);
+                message("参考图未能转入生成会话，请重试。"); return;
+            }
+            studio.updateDraft(session, requestPrompt, requestVideo, requestRatio, requestSeconds);
+        }
+        studio.start(account, multiProfile, requestPrompt, requestVideo, requestRatio, requestSeconds, session);
+        if (session != null) studio.updateDraft(session, "", requestVideo, requestRatio, requestSeconds);
         studioInput.setText("");
+        renderScreen(STUDIO);
         studioPinned = true;
         if (studioScroll != null) studioScroll.post(() -> scrollStudioToEnd(true));
     }
@@ -1734,7 +1477,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     private void reusePrompt(MobileStudio.Entry entry) {
         if (studio.running() == null) {
             for (AccountStore.Account account : accounts.all()) {
-                if (account.id.equals(entry.owner) && accounts.usable(account, multiProfile)) { select(account); break; }
+                if (account.id.equals(entry.owner) && accounts.usable(account, multiProfile)) { generationAccountId = account.id; break; }
             }
             studio.selectSession(entry.sessionId);
         }
@@ -1747,15 +1490,47 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     private void message(String text) {
-        if (root == null || isFinishing()) { Toast.makeText(this, text, Toast.LENGTH_SHORT).show(); return; }
-        Snackbar bar = Snackbar.make(root, text, Snackbar.LENGTH_SHORT);
-        View view = bar.getView();
-        view.setBackground(ui.shape(INK, 12, 0));
-        TextView label = view.findViewById(com.google.android.material.R.id.snackbar_text);
-        if (label != null) { label.setTextColor(BG); label.setMaxLines(3); }
-        if (screen == STUDIO && studioComposer != null && studioComposer.isAttachedToWindow() && !sidebar.isOpen())
-            bar.setAnchorView(studioComposer);
-        bar.show();
+        if (root == null || closing || isFinishing() || isDestroyed()) return;
+        clearMessage();
+        LinearLayout pill = ui.row();
+        pill.setPadding(ui.dp(14), ui.dp(8), ui.dp(14), ui.dp(8));
+        pill.setBackground(ui.shape(INK, 999, 0)); pill.setElevation(ui.dp(12));
+        pill.setClickable(false); pill.setFocusable(false);
+        View dot = new View(this); dot.setBackground(ui.shape(ACCENT, 99, 0));
+        pill.addView(dot, new LinearLayout.LayoutParams(ui.dp(6), ui.dp(6)));
+        TextView label = ui.text(text, 12, BG, true); label.setMaxLines(3);
+        label.setMaxWidth(Math.max(ui.dp(80), root.getWidth() - ui.dp(82)));
+        LinearLayout.LayoutParams textPosition = new LinearLayout.LayoutParams(-2, -2); textPosition.setMarginStart(ui.dp(8));
+        pill.addView(label, textPosition); messagePill = pill;
+        root.addView(pill, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        positionMessage();
+        pill.announceForAccessibility(text);
+        if (android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            pill.setTranslationY(-ui.dp(14)); pill.setAlpha(0); pill.setScaleX(.95f); pill.setScaleY(.95f);
+            pill.animate().translationY(0).alpha(1).scaleX(1).scaleY(1).setDuration(240)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(.6f)).start();
+        }
+        messageHandler.postDelayed(hideMessage, 2200);
+    }
+
+    private void positionMessage() {
+        if (messagePill == null) return;
+        FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) messagePill.getLayoutParams();
+        p.topMargin = topInset + ui.dp(8); p.leftMargin = p.rightMargin = ui.dp(16); messagePill.setLayoutParams(p);
+    }
+
+    private void fadeMessage() {
+        View pill = messagePill;
+        if (pill == null) return;
+        if (!android.animation.ValueAnimator.areAnimatorsEnabled()) { clearMessage(); return; }
+        pill.animate().alpha(0).translationY(-ui.dp(8)).setDuration(160).withEndAction(() -> {
+            root.removeView(pill); if (messagePill == pill) messagePill = null;
+        }).start();
+    }
+
+    private void clearMessage() {
+        messageHandler.removeCallbacksAndMessages(null);
+        if (messagePill != null) { messagePill.animate().cancel(); root.removeView(messagePill); messagePill = null; }
     }
 
     /**
@@ -1795,12 +1570,16 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (!ready) return;
         boolean night = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        dismissAccountMenu();
+        if (generationSheet != null) generationSheet.dismiss();
         if (night != themeNight || themeApplied != themeGeneration) applyTheme();
     }
 
     /** 用新配色重建原生界面；WebView 只是从旧容器挪到新容器，不会重新加载。 */
     private void applyTheme() {
         themeApplied = themeGeneration;
+        clearMessage();
+        if (generationSheet != null) generationSheet.dismiss();
         dismissAccountMenu();
         hideKeyboard();
         syncStudioDraft();
@@ -1811,15 +1590,6 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         window.setNavigationBarColor(BG);
         applyBarAppearance();
         main.setBackgroundColor(BG);
-
-        // 悬浮头像：换新配色，位置和收起状态不变。
-        int switchIndex = root.indexOfChild(quickSwitch);
-        ViewGroup.LayoutParams switchLayout = quickSwitch.getLayoutParams();
-        int switchVisibility = quickSwitch.getVisibility();
-        root.removeView(quickSwitch);
-        quickSwitch = buildQuickSwitch();
-        quickSwitch.setVisibility(switchVisibility);
-        root.addView(quickSwitch, switchIndex < 0 ? root.getChildCount() : switchIndex, switchLayout);
 
         // 侧栏：重建后按原来的分页恢复；原来开着就直接显示，不再滑一次。
         boolean reopen = themeReopenSidebar || sidebar.isOpen();
@@ -1834,11 +1604,11 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         root.addView(sidebar, sidebarIndex < 0 ? root.getChildCount() : sidebarIndex, sidebarLayout);
 
         renderScreen(screen);
-        placeQuickSwitch(false, null);
+
         if (reopen) {
             renderSidebar();
             sidebar.showSessions(sessions);
-            quickSwitch.setVisibility(View.GONE);
+
             main.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
             main.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
             main.setFocusable(false);
@@ -1848,7 +1618,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             main.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
             main.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
             main.setFocusableInTouchMode(true);
-            updateQuickSwitchVisibility();
+
         }
         if (accountEditor != null) accountEditor.retheme(this, accounts);
         if (deleteConfirmation != null && deleteConfirmation.isShowing()) {
@@ -1864,8 +1634,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             sidebar.updateAvatar(id, quotas.avatar(id));
         }
         if (!closing) {
-            updateQuickSwitchFace();
-            AccountStore.Account account = current();
+            updateQuotaDots();
+            AccountStore.Account account = generationAccount();
             if (account != null && account.id.equals(id)) updateStudioAccount();
             if (accountEditor != null) accountEditor.updateQuota(id);
         }
@@ -1875,7 +1645,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
     AccountEditor openEditor(AccountStore.Account account) {
         if (account == null && !multiProfile) return null;
-        if (studio.running() != null && (account == null || studio.accountInUse(account.id))) {
+        if (studio.running() != null) {
             message("请等当前任务结束，或先停止生成再修改账号。");
             return null;
         }
@@ -1883,6 +1653,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         Runnable refresh = account != null && accounts.all().contains(account) && accounts.usable(account, multiProfile)
             ? () -> refreshAccount(account) : null;
         AccountEditor opened = AccountEditor.show(this, ui, account, remove, proxies, accounts, quotas, this::openProxyManager, refresh, (name, proxyId, routeEdited) -> {
+            // The editor can predate the running job. Save has not written anything yet.
+            if (studio.running() != null) throw new IOException("请等当前生成结束，或先停止生成再保存账号。");
             boolean sameRoute = account != null && (!routeEdited || account.proxyId().equals(proxyId == null ? "" : proxyId)
                 && !(account.hasProxy() && account.proxyId().isEmpty()));
             if (account != null && account.name.equals(name) && sameRoute) {
@@ -1919,7 +1691,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         syncAccountOrder();
         updateStudioAccount();
         renderSidebar();
-        updateQuickSwitchFace();
+        updateQuotaDots();
         showScreen(WEB);
     }
 
@@ -1941,26 +1713,27 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (screen == PROXIES) renderScreen(PROXIES);
         else renderSidebar();
         syncCurrentQuota();
-        updateQuickSwitchVisibility();
-        updateQuickSwitchFace();
+
+        updateQuotaDots();
     }
 
     private View renderProxyManager() {
         LinearLayout page = ui.column();
         page.setBackgroundColor(BG);
-        LinearLayout toolbar = ui.toolbar();
-        toolbar.addView(sidebarButton());
+        LinearLayout toolbar = ui.compactToolbar();
+        toolbar.setPadding(ui.dp(10), ui.dp(6), ui.dp(10), ui.dp(6));
+        toolbar.addView(sidebarButton(), headerIconSize());
         LinearLayout heading = ui.column();
         heading.setPadding(ui.dp(6), 0, ui.dp(6), 0);
-        heading.addView(ui.single(ui.text("代理设置", 17, INK, true)));
+        heading.addView(ui.single(ui.text("代理设置", 15.5f, INK, true)));
         int inUse = 0;
         for (AccountStore.Account account : accounts.all()) if (account.hasProxy()) inUse++;
-        TextView summary = ui.single(ui.text(proxies.all().size() + " 条配置 · " + inUse + " 个账号在用", 12, TEXT2, false));
+        TextView summary = ui.single(ui.meta(proxies.all().size() + " 条配置 · " + inUse + " 个账号在用", 10.5f, MUTED));
         LinearLayout.LayoutParams summaryPosition = new LinearLayout.LayoutParams(-1, -2);
-        summaryPosition.topMargin = ui.dp(4);
+        summaryPosition.topMargin = ui.dp(2);
         heading.addView(summary, summaryPosition);
         toolbar.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        toolbar.addView(ui.iconButton(R.drawable.ic_add, "新增代理", INK, () -> editProxy(null)));
+        toolbar.addView(ui.compactIconButton(R.drawable.ic_add, "新增代理", INK, () -> editProxy(null)), headerIconSize());
         ui.block(page, toolbar, 0);
         ScrollView list = new ScrollView(this);
         list.setFillViewport(true);
@@ -1972,7 +1745,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             @Override public String routing() {
                 if (!multiProfile) return "WebView 不支持多账号";
                 if (!browser.hubAllowed()) return "串号风险：跨代理切换将重新加载，请重新检测";
-                return "本机分流";
+                return browser.hubActive() ? "本机分流" : "本机分流可用，代理网页启动后启用。";
             }
         }), new ScrollView.LayoutParams(-1, -2));
         page.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -1981,11 +1754,11 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
     private void editProxy(ProxyProfile profile) {
         MobileStudio.Entry running = studio.running();
-        if (profile != null && running != null && profile.id.equals(runningProxyId(running.owner))) {
+        if (running != null) {
             message("请等当前生成结束后再修改此代理。");
             return;
         }
-        ProxyEditor.show(this, ui, profile, proxies, accounts, id -> proxyChanged(profile),
+        ProxyEditor.show(this, ui, profile, proxies, accounts, () -> studio.running() == null, id -> proxyChanged(profile),
             profile == null ? null : () -> removeProxy(profile));
     }
 
@@ -2107,6 +1880,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     }
 
     private void removeProxy(ProxyProfile profile) {
+        if (studio.running() != null) { message("请等当前生成结束，或先停止生成再删除代理。"); return; }
         try {
             proxies.remove(profile, accounts);
             if (screen == PROXIES) renderScreen(PROXIES);
@@ -2122,15 +1896,17 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         webBack = ui.compactIconButton(R.drawable.ic_web_back, "返回上一页", INK, browser::back);
         bar.addView(webBack, headerIconSize());
         LinearLayout url = ui.row();
-        url.setBackground(ui.shape(RAISED, 8, LINE));
+        url.setBackground(ui.shape(RAISED, 10, 0));
         url.setPadding(ui.dp(10), 0, ui.dp(10), 0);
-        url.addView(ui.iconView(R.drawable.ic_lock, TEXT2, 12));
-        webTitle = ui.single(ui.text("Muse", 13, INK, true));
-        webTitle.setMaxWidth(ui.dp(120));
+        webQuotaDot = quotaDot(); url.addView(webQuotaDot);
+        accountTrigger(url);
+        url.setContentDescription("网页账号与地址，长按快速切换账号");
+        webTitle = ui.single(ui.text("Muse", 12.5f, INK, true));
+        webTitle.setMaxWidth(ui.dp(92));
         LinearLayout.LayoutParams titlePosition = new LinearLayout.LayoutParams(-2, -2);
         titlePosition.setMarginStart(ui.dp(6));
         url.addView(webTitle, titlePosition);
-        webSubtitle = ui.single(ui.text("muse.ai", 12, TEXT2, false));
+        webSubtitle = ui.single(ui.meta("muse.ai", 10.5f, MUTED));
         LinearLayout.LayoutParams subtitlePosition = new LinearLayout.LayoutParams(0, -2, 1);
         subtitlePosition.setMarginStart(ui.dp(6));
         url.addView(webSubtitle, subtitlePosition);
@@ -2145,10 +1921,10 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
 
         webProgress = new LinearProgressIndicator(this);
         webProgress.setIndeterminate(true);
-        webProgress.setIndicatorColor(ACCENT);
+        webProgress.setIndicatorColor(TEXT2);
         webProgress.setTrackColor(Color.TRANSPARENT);
         webProgress.setTrackThickness(ui.dp(2));
-        page.addView(webProgress, new LinearLayout.LayoutParams(-1, -2));
+        page.addView(webProgress, new LinearLayout.LayoutParams(-1, ui.dp(2)));
         webNotice = ui.note("", 0);
         LinearLayout.LayoutParams noticePosition = new LinearLayout.LayoutParams(-1, -2);
         noticePosition.setMargins(ui.dp(10), ui.dp(4), ui.dp(10), ui.dp(4));
@@ -2189,7 +1965,8 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         webSubtitle.setText("· " + (host == null ? "muse.ai" : host) + route);
         webBack.setEnabled(browser.canGoBack());
         webBack.setAlpha(browser.canGoBack() ? 1f : 0.45f);
-        webProgress.setVisibility(browser.loading() ? View.VISIBLE : View.GONE);
+        webProgress.setVisibility(browser.loading() ? View.VISIBLE : View.INVISIBLE);
+        updateQuotaDots();
         webNotice.setText(browser.notice());
         webNotice.setVisibility(browser.notice().isEmpty() ? View.GONE : View.VISIBLE);
         WebView active = browser.view();
@@ -2225,7 +2002,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
             return true;
         } catch (RuntimeException error) {
             clearFile();
-            Toast.makeText(this, "无法打开文件选择器", Toast.LENGTH_SHORT).show();
+            message("无法打开文件选择器");
             return true;
         }
     }
@@ -2316,7 +2093,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         if (videoView != null || screen != WEB) { callback.onCustomViewHidden(); return; }
         sidebar.close(false);
         dismissAccountMenu();
-        if (quickSwitch != null) quickSwitch.setVisibility(View.GONE);
+
         videoView = view; videoCallback = callback;
         videoView.setBackgroundColor(Color.BLACK);
         main.setVisibility(View.GONE);
@@ -2337,7 +2114,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
         WebChromeClient.CustomViewCallback callback = videoCallback;
         videoCallback = null;
         if (callback != null) callback.onCustomViewHidden();
-        updateQuickSwitchVisibility();
+
     }
 
     private void hideKeyboard() {
@@ -2389,6 +2166,7 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override protected void onStop() {
         if (!ready) { super.onStop(); return; }
         dismissAccountMenu();
+        clearMessage();
         draftHandler.removeCallbacks(persistComposerHeight);
         persistComposerHeight.run();
         syncStudioDraft();
@@ -2400,6 +2178,10 @@ public final class MainActivity extends AppCompatActivity implements MuseWeb.Hos
     @Override protected void onDestroy() {
         if (!ready) { super.onDestroy(); return; }
         closing = true;
+        clearMessage();
+        quotaHandler.removeCallbacksAndMessages(null);
+        draftHandler.removeCallbacksAndMessages(null);
+        if (generationSheet != null) generationSheet.dismiss();
         if (updater != null) updater.close();
         if (transferUi != null) transferUi.close();
         dismissAccountMenu();

@@ -38,7 +38,8 @@ import java.util.function.IntConsumer;
  * 通过 {@link #load(Context)} 读取有效资源；外观变化只重建原生界面。
  */
 final class MobileUi {
-    static int BG, SURFACE, RAISED, LINE, LINE_STRONG, INK, TEXT2, MUTED, ACCENT, ON_ACCENT, ACCENT_SOFT, SCRIM, PROGRESS;
+    static int BG, SURFACE, RAISED, ACTIVE_CARD, LINE, LINE_STRONG, INK, TEXT2, MUTED, ACCENT, ON_ACCENT, ACCENT_SOFT, SCRIM, PROGRESS;
+    static final int COMPOSER_ACTION_SIZE = 36;
     /** 额度色阶：已用 0 / 45 / 65 / 82 / 95% 五个色标。 */
     static int Q0, Q1, Q2, Q3, Q4;
     /** 元数据等宽字：JetBrains Mono（res/font，SIL OFL 1.1）；读取失败时退回系统等宽字。 */
@@ -65,6 +66,7 @@ final class MobileUi {
         BG = context.getColor(R.color.muse_bg);
         SURFACE = context.getColor(R.color.muse_surface);
         RAISED = context.getColor(R.color.muse_raised);
+        ACTIVE_CARD = context.getColor(R.color.muse_active_card);
         LINE = context.getColor(R.color.muse_line);
         LINE_STRONG = context.getColor(R.color.muse_line_strong);
         INK = context.getColor(R.color.muse_text);
@@ -186,7 +188,16 @@ final class MobileUi {
 
     int dp(float value) { return Math.round(value * context.getResources().getDisplayMetrics().density); }
 
-    int ripple() { return NIGHT ? 0x21D1E8D5 : 0x18275A46; }
+    static void notice(Context context, String text) {
+        Context owner = context;
+        while (owner instanceof android.content.ContextWrapper wrapper && !(owner instanceof MainActivity)) {
+            Context base = wrapper.getBaseContext(); if (base == owner) break; owner = base;
+        }
+        if (owner instanceof MainActivity activity) activity.notice(text);
+        else android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    int ripple() { return androidx.core.graphics.ColorUtils.setAlphaComponent(INK, NIGHT ? 20 : 15); }
 
     LinearLayout column() {
         LinearLayout layout = new LinearLayout(context);
@@ -198,6 +209,28 @@ final class MobileUi {
         LinearLayout layout = new LinearLayout(context);
         layout.setGravity(Gravity.CENTER_VERTICAL);
         layout.setBaselineAligned(false);
+        return layout;
+    }
+
+    /** A short name hugs its badge; long names yield only the space the badge needs. */
+    LinearLayout nameRow() {
+        LinearLayout layout = new LinearLayout(context) {
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                if (getChildCount() > 0 && getChildAt(0) instanceof TextView name
+                    && MeasureSpec.getMode(widthSpec) != MeasureSpec.UNSPECIFIED) {
+                    int reserved = getPaddingLeft() + getPaddingRight();
+                    for (int i = 1; i < getChildCount(); i++) {
+                        View child = getChildAt(i);
+                        measureChildWithMargins(child, widthSpec, 0, heightSpec, 0);
+                        LinearLayout.LayoutParams p = (LinearLayout.LayoutParams) child.getLayoutParams();
+                        reserved += child.getMeasuredWidth() + p.leftMargin + p.rightMargin;
+                    }
+                    name.setMaxWidth(Math.max(1, MeasureSpec.getSize(widthSpec) - reserved));
+                }
+                super.onMeasure(widthSpec, heightSpec);
+            }
+        };
+        layout.setGravity(Gravity.CENTER_VERTICAL); layout.setBaselineAligned(false);
         return layout;
     }
 
@@ -243,7 +276,7 @@ final class MobileUi {
         TextView view = text(text, size, color, false);
         view.setTypeface(MONO);
         view.setFontFeatureSettings("tnum");
-        view.setLetterSpacing(0.04f);
+        view.setLetterSpacing(0.03f);
         return view;
     }
 
@@ -424,11 +457,11 @@ final class MobileUi {
         return button;
     }
 
-    /** 生成键：46dp 强调色方圆。 */
+    /** 仅工作室使用：与生成账号环相同的 36dp 圆形按钮。 */
     ImageButton sendButton(Runnable action) {
         ImageButton button = new ImageButton(context);
         button.setScaleType(ImageView.ScaleType.CENTER);
-        int size = dp(46);
+        int size = dp(COMPOSER_ACTION_SIZE);
         button.setLayoutParams(new LinearLayout.LayoutParams(size, size));
         button.setOnClickListener(v -> action.run());
         button.setFocusable(true);
@@ -440,7 +473,11 @@ final class MobileUi {
         String state = busy ? "busy" : ready ? "ready" : "idle";
         if (state.equals(button.getTag())) return;
         button.setTag(state);
-        button.setImageResource(busy ? R.drawable.ic_stop : R.drawable.ic_send);
+        Drawable glyph = context.getDrawable(busy ? R.drawable.ic_stop : R.drawable.ic_send);
+        if (glyph != null) {
+            android.graphics.drawable.InsetDrawable inset = new android.graphics.drawable.InsetDrawable(glyph, dp(2));
+            button.setImageDrawable(inset);
+        }
         button.setImageTintList(ColorStateList.valueOf(busy ? INK : ON_ACCENT));
         int color = busy ? RAISED : ACCENT;
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(busy ? ripple() : 0x33FFFFFF), shape(color, 23, 0), null));
@@ -574,7 +611,7 @@ final class MobileUi {
             leadPosition.setMarginEnd(dp(6));
             chip.addView(lead, leadPosition);
         }
-        TextView text = single(text(value, 13, INK, false));
+        TextView text = single(meta(value, 12, INK));
         text.setMaxWidth(dp(86));
         chip.addView(text, new LinearLayout.LayoutParams(-2, -2));
         if (chevron) {
@@ -659,6 +696,8 @@ final class MobileUi {
     final class Sheet {
         final BottomSheetDialog dialog;
         final LinearLayout body, actions;
+        final ScrollView scroll;
+        private int bodyHeightLimit;
         private final Activity owner;
         private java.util.function.BooleanSupplier dirty;
         private boolean leaving;
@@ -690,12 +729,13 @@ final class MobileUi {
                 sub.setPadding(dp(2), dp(8), dp(2), 0);
                 panel.addView(sub);
             }
-            ScrollView scroll = new ScrollView(activity) {
+            scroll = new ScrollView(activity) {
                 @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                     int available = getResources().getDisplayMetrics().heightPixels;
                     View parent = (View) getParent();
                     if (parent != null && parent.getRootView().getHeight() > 0) available = Math.min(available, parent.getRootView().getHeight());
                     int limit = Math.round(available * .62f);
+                    if (bodyHeightLimit > 0) limit = Math.min(limit, dp(bodyHeightLimit));
                     if (MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) limit = Math.min(limit, MeasureSpec.getSize(heightMeasureSpec));
                     super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST));
                 }
@@ -723,6 +763,8 @@ final class MobileUi {
         }
 
         void add(View view, int top) { block(body, view, top); }
+
+        void limitBodyHeight(int heightDp) { bodyHeightLimit = heightDp; scroll.requestLayout(); }
 
         void action(View view, boolean weight) {
             actions.setVisibility(View.VISIBLE);
@@ -762,6 +804,25 @@ final class MobileUi {
 
     /** 周额度刻度条：20 格，已用格按额度色阶着色；不限量时整条为浅色。 */
     View tickBar() { return new TickBar(context); }
+
+    View miniProgress(Double used, boolean known) {
+        return new View(context) {
+            final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            @Override protected void onDraw(Canvas canvas) {
+                float radius = getHeight() / 2f;
+                paint.setColor(LINE_STRONG);
+                canvas.drawRoundRect(0, 0, getWidth(), getHeight(), radius, radius, paint);
+                float fraction = !known ? 0f : used == null ? 1f : (float) Math.max(0, Math.min(1, used / 100));
+                paint.setColor(known && used == null ? quotaColor(0d) : quotaColor(used));
+                canvas.drawRoundRect(0, 0, getWidth() * fraction, getHeight(), radius, radius, paint);
+            }
+        };
+    }
+
+    /** Fixed design height at default scale, enough room for accessibility font sizes. */
+    int rowHeight(int base) {
+        return dp(base + Math.max(0, context.getResources().getConfiguration().fontScale - 1f) * 28);
+    }
 
     static void setTicks(View bar, Double used, boolean known) {
         if (bar instanceof TickBar ticks) ticks.set(used, known);

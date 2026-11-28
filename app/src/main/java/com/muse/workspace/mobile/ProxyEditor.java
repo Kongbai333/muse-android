@@ -13,7 +13,7 @@ import static com.muse.workspace.mobile.MobileUi.*;
 /** 新增 / 编辑代理：底部弹窗。测试结果直接显示在表单里；有账号引用时删除会说明原因。 */
 final class ProxyEditor {
     static void show(Activity activity, MobileUi ui, ProxyProfile existing, ProxyStore proxies, AccountStore accounts,
-            Consumer<String> saved, Runnable remove) {
+            java.util.function.BooleanSupplier canSave, Consumer<String> saved, Runnable remove) {
         MobileUi.Sheet sheet = ui.sheet(activity, existing == null ? "新增代理" : "编辑代理",
             existing == null ? "一条配置可以被多个账号共用。" : "修改后，使用它的账号会在下次打开网页时生效。");
 
@@ -152,6 +152,8 @@ final class ProxyEditor {
         });
         TextView save = ui.primary("保存", () -> { });
         save.setOnClickListener(view -> {
+            // This editor persists internally, so guard before add/update (not in saved).
+            if (!canSave.getAsBoolean()) { say.accept(new String[]{"warn", "请等当前生成结束，或先停止生成再保存代理。"}); return; }
             String name = title.getText().toString().trim();
             if (name.isEmpty()) { title.setError("请填写代理名称"); say.accept(new String[]{"warn", "请填写代理名称。"}); return; }
             try {

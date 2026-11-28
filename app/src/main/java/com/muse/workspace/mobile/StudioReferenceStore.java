@@ -39,6 +39,25 @@ final class StudioReferenceStore {
 
     File file(String sessionId, int index) { return fileFor(directory, sessionId, index); }
 
+    /** Switching the generation owner preserves the source draft and reference order. */
+    int copySession(String sourceSession, String targetSession) throws IOException {
+        int count = count(sourceSession), copied = 0;
+        try {
+            for (; copied < count; copied++) {
+                File source = file(sourceSession, copied), target = file(targetSession, copied);
+                if (source == null || target == null) throw new IOException("工作室会话无效");
+                java.nio.file.Files.copy(source.toPath(), target.toPath());
+            }
+            return count;
+        } catch (IOException failure) {
+            for (int index = 0; index < copied; index++) {
+                File target = file(targetSession, index);
+                if (target != null) target.delete();
+            }
+            throw failure;
+        }
+    }
+
     /** 从第 1 张起连续存在的参考图数量。 */
     int count(String sessionId) {
         int count = 0;

@@ -22,7 +22,7 @@ import java.util.function.Predicate;
 
 import static com.muse.workspace.mobile.MobileUi.*;
 
-/** 左侧滑入的会话 / 账号侧栏：顶部下划线分页 + 「+」，账号叠放显示，底部一行图标导航。 */
+/** 左侧滑入的会话 / 账号侧栏：下划线分页、高密度账号列表与单行五格导航。 */
 final class AccountSidebar extends FrameLayout {
     interface Host extends AccountDeck.Host {
         void sidebarClosed();
@@ -141,7 +141,7 @@ final class AccountSidebar extends FrameLayout {
         sessionScroll.addView(sessionRows, new ScrollView.LayoutParams(-1, -2));
         lists.addView(sessionScroll, new FrameLayout.LayoutParams(-1, -1));
         rows = ui.column();
-        rows.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(16));
+        rows.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(16));
         rows.setClipChildren(false);
         rows.setClipToPadding(false);
         deck = new AccountDeck(context, ui, host, proxies);
@@ -179,9 +179,9 @@ final class AccountSidebar extends FrameLayout {
         linePosition.setMargins(ui.dp(14), 0, ui.dp(14), 0);
         panel.addView(line, linePosition);
 
-        // 底部导航：一行三个入口，图标在上、文字在下。
+        // 底部导航：五个等宽入口，图标在上、文字在下。
         navigation = ui.row();
-        navigation.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(12));
+        navigation.setPadding(ui.dp(6), ui.dp(4), ui.dp(6), ui.dp(4));
         panel.addView(navigation, new LinearLayout.LayoutParams(-1, -2));
         updateSection();
         setVisibility(GONE);
@@ -190,7 +190,7 @@ final class AccountSidebar extends FrameLayout {
     private void tab(LinearLayout column, TextView label, View underline, Runnable action) {
         column.setGravity(Gravity.CENTER_HORIZONTAL);
         label.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams labelPosition = new LinearLayout.LayoutParams(-2, ui.dp(40));
+        LinearLayout.LayoutParams labelPosition = new LinearLayout.LayoutParams(-2, ui.dp(38));
         column.addView(label, labelPosition);
         LinearLayout.LayoutParams linePosition = new LinearLayout.LayoutParams(-1, ui.dp(2));
         column.addView(underline, linePosition);
@@ -584,7 +584,7 @@ final class AccountSidebar extends FrameLayout {
     private View dock(int icon, String label, String badge, boolean active, Runnable action) {
         LinearLayout item = ui.column();
         item.setGravity(Gravity.CENTER_HORIZONTAL);
-        item.setPadding(0, ui.dp(4), 0, ui.dp(4));
+        item.setPadding(0, ui.dp(2), 0, ui.dp(2));
         FrameLayout pill = new FrameLayout(getContext());
         pill.setBackground(ui.shape(active ? RAISED : Color.TRANSPARENT, R_MD, 0));
         pill.addView(ui.iconView(icon, active ? INK : TEXT2, 20), new FrameLayout.LayoutParams(ui.dp(20), ui.dp(20), Gravity.CENTER));
@@ -598,17 +598,17 @@ final class AccountSidebar extends FrameLayout {
             badgePosition.setMarginEnd(ui.dp(5));
             pill.addView(count, badgePosition);
         }
-        item.addView(pill, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(30)));
-        TextView text = ui.single(ui.text(label, 11, active ? INK : TEXT2, active));
+        item.addView(pill, new LinearLayout.LayoutParams(ui.dp(40), ui.dp(28)));
+        TextView text = ui.single(ui.text(label, 10, active ? INK : TEXT2, active));
         text.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams textPosition = new LinearLayout.LayoutParams(-2, -2);
-        textPosition.topMargin = ui.dp(5);
+        LinearLayout.LayoutParams textPosition = new LinearLayout.LayoutParams(-1, -2);
+        textPosition.topMargin = ui.dp(4);
         item.addView(text, textPosition);
         item.setSelected(active);
         item.setContentDescription(label + (badge.isEmpty() ? "" : "，" + badge + " 条") + (active ? "，当前页面" : ""));
         item.setTooltipText(label);
         ui.touch(item, Color.TRANSPARENT, R_MD, 0, action);
-        navigation.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
+        navigation.addView(item, new LinearLayout.LayoutParams(0, ui.rowHeight(48), 1));
         return item;
     }
 
